@@ -108,6 +108,48 @@ test("neighbors and lower bound handle present keys, gaps, ties, and boundaries"
   assert.equal(tree.lowerBound(key(40)), undefined);
 });
 
+test("scheduling keys order equal timestamps by namespaced ID and delete independently", () => {
+  const tree = makeTree();
+  const start = Date.UTC(2026, 10, 26, 1);
+  const academic = key(start, "academic:12");
+  const reservation = key(start, "reservation:12");
+  const later = key(start + 1, "academic:1");
+
+  for (const entryKey of [reservation, later, academic]) {
+    assert.equal(tree.insert(entryKey, entryKey.id), true);
+    assert.equal(tree.verifyInvariants(), true);
+  }
+
+  assert.equal(tree.search(key(start, "reservation:13")), undefined);
+  assert.deepEqual([...tree.inOrder()].map(entry => entry.key), [academic, reservation, later]);
+  assert.deepEqual(tree.lowerBound(key(start, ""))?.key, academic);
+  assert.deepEqual(tree.successor(key(start, ""))?.key, academic);
+  assert.equal(tree.delete(academic), true);
+  assert.equal(tree.verifyInvariants(), true);
+  assert.deepEqual(tree.lowerBound(key(start, ""))?.key, reservation);
+  assert.deepEqual(tree.predecessor(later)?.key, reservation);
+});
+
+test("rebalances during consecutive deletions from either end of the tree", () => {
+  const starts = Array.from({ length: 63 }, (_, index) => index + 1);
+  for (const direction of [1, -1]) {
+    const tree = insertStarts(starts);
+    const remaining = [...starts];
+    const removals = direction === 1 ? starts : [...starts].reverse();
+
+    for (const target of removals) {
+      if (direction === 1) remaining.shift();
+      else remaining.pop();
+
+      assert.equal(tree.delete(key(target)), true);
+      assert.equal(tree.search(key(target)), undefined);
+      assert.equal(tree.verifyInvariants(), true, `direction ${direction}, after deleting ${target}`);
+      assert.equal(tree.size, remaining.length);
+      assert.deepEqual([...tree.inOrder()].map(entry => entry.key.start), remaining);
+    }
+  }
+});
+
 test("matches a sorted reference after 6,000 seeded random insertions and deletions", () => {
   for (const seed of [7, 42, 2026]) {
     let state = seed;
@@ -143,6 +185,9 @@ test("matches a sorted reference after 6,000 seeded random insertions and deleti
       assert.deepEqual(tree.successor(candidate), sorted.find(entry =>
         entry.key.start > candidate.start ||
         (entry.key.start === candidate.start && entry.key.id > candidate.id)), context);
+      assert.deepEqual(tree.lowerBound(candidate), sorted.find(entry =>
+        entry.key.start > candidate.start ||
+        (entry.key.start === candidate.start && entry.key.id >= candidate.id)), context);
     }
 
     for (const { key: remaining } of reference.values()) {
