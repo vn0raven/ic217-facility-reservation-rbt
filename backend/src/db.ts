@@ -7,15 +7,40 @@ import Database from "better-sqlite3";
 const dataDirectory = new URL("../data/", import.meta.url);
 const databasePath = fileURLToPath(new URL("ic217.sqlite", dataDirectory));
 
-export function initializeDatabase(verify = false): void {
-  mkdirSync(dataDirectory, { recursive: true });
-  const db = new Database(databasePath);
+export function openDatabase(filename = databasePath): Database.Database {
+  if (filename === databasePath) mkdirSync(dataDirectory, { recursive: true });
+  const db = new Database(filename);
 
   try {
     db.pragma("foreign_keys = ON");
     const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
-    db.transaction(() => db.exec(schema))();
+    db.transaction(() => {
+      const version = db.pragma("user_version", { simple: true });
+      if (version === 1) return;
+      if (version !== 0) throw new Error(`Unsupported database schema version: ${version}`);
+      db.exec(schema);
+      db.exec(`
+        ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'requester'
+          CHECK (role IN ('requester', 'admin'));
+        ALTER TABLE facilities ADD COLUMN location TEXT CHECK (length(trim(location)) > 0);
+        ALTER TABLE facilities ADD COLUMN capacity INTEGER
+          CHECK (capacity BETWEEN 1 AND 9007199254740991);
+        ALTER TABLE facilities ADD COLUMN active INTEGER NOT NULL DEFAULT 1
+          CHECK (active IN (0, 1));
+        CREATE INDEX reservations_by_facility_start ON reservations (facility_id, start_ms, id);
+        PRAGMA user_version = 1;
+      `);
+    }).immediate();
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
 
+export function initializeDatabase(verify = false): void {
+  const db = openDatabase();
+  try {
     if (!verify) return;
 
     db.exec("BEGIN");

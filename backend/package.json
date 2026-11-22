@@ -9,6 +9,7 @@
     "dev": "node --watch src/server.ts",
     "start": "node src/server.ts",
     "typecheck": "tsc",
+    "test": "node --test src/backend.test.ts",
     "db:init": "node src/db.ts",
     "db:verify": "node src/db.ts --verify"
   },
