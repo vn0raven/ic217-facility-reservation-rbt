@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { config } from "dotenv";
 import { createApp } from "./app.ts";
-import { initializeDatabase } from "./db.ts";
+import { openDatabase } from "./db.ts";
+import { createRepositories } from "./repositories.ts";
 
 config({ path: fileURLToPath(new URL("../.env", import.meta.url)), quiet: true });
 
@@ -12,7 +13,8 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error("PORT must be an integer from 1 through 65535");
 }
 
-initializeDatabase();
-createApp().listen(port, host, () => {
+const db = openDatabase(process.env.SQLITE_PATH);
+const server = createApp(createRepositories(db)).listen(port, host, () => {
   console.log(`API listening on http://${host}:${port}`);
 });
+server.once("close", () => db.close());
