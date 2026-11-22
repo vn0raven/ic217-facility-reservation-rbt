@@ -6,10 +6,55 @@
     <title>Campus Facility Reservations</title>
   </head>
   <body>
-    <main>
-      <h1>Campus Facility Reservations</h1>
-      <p>University of Southeastern Philippines · IC 217</p>
-      <p id="api-status" role="status">Checking API connection…</p>
+    <header class="header">
+      <div class="wrap header-inner">
+        <a class="brand" href="#dashboard">Campus Facility Reservations</a>
+        <nav aria-label="Main navigation">
+          <a href="#dashboard">Dashboard</a>
+          <a href="#facilities">Facilities</a>
+          <a href="#reservation">Reservation form</a>
+        </nav>
+      </div>
+    </header>
+    <main class="wrap">
+      <section id="dashboard" aria-labelledby="dashboard-title">
+        <p class="institution">University of Southeastern Philippines · IC 217</p>
+        <h1 id="dashboard-title">Campus Facility Reservations</h1>
+        <p>Browse campus facilities and check the details of a proposed reservation.</p>
+        <p id="api-status" role="status">Checking API connection…</p>
+        <a class="button" href="#facilities">Browse facilities</a>
+      </section>
+      <section id="facilities" aria-labelledby="facilities-title" hidden>
+        <h1 id="facilities-title">Facilities</h1>
+        <p id="facility-status" role="status">Loading facilities…</p>
+        <ul id="facility-list"></ul>
+      </section>
+      <section id="reservation" aria-labelledby="reservation-title" hidden>
+        <h1 id="reservation-title">Reservation form</h1>
+        <p>Check your reservation details before submission becomes available.</p>
+        <form id="reservation-form" class="panel">
+          <label for="facility">Facility</label>
+          <select id="facility" name="facility" required>
+            <option value="">Loading facilities…</option>
+          </select>
+          <label for="date">Reservation date</label>
+          <input id="date" name="date" type="date" required>
+          <div class="form-times">
+            <div>
+              <label for="start">Start time</label>
+              <input id="start" name="start" type="time" required>
+            </div>
+            <div>
+              <label for="end">End time</label>
+              <input id="end" name="end" type="time" required>
+            </div>
+          </div>
+          <label for="purpose">Purpose</label>
+          <textarea id="purpose" name="purpose" rows="3" maxlength="250" required></textarea>
+          <p id="form-status" role="status"></p>
+          <button type="submit" disabled>Check reservation details</button>
+        </form>
+      </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

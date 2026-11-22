@@ -1,20 +1,30 @@
-import type { HealthResponse } from "../../shared/types/index.ts";
+import { renderFacilities } from "./pages/facilities.ts";
+import { initializeReservationForm } from "./pages/reservation.ts";
+import { getFacilities, getHealth } from "./services/api.ts";
 import "./style.css";
 
-const status = document.querySelector<HTMLParagraphElement>("#api-status");
+const pages = document.querySelectorAll<HTMLElement>("main > section");
+const links = document.querySelectorAll<HTMLAnchorElement>("nav a");
 
-async function checkApi(): Promise<void> {
-  if (!status) return;
-
-  try {
-    const response = await fetch("/api/health");
-    if (!response.ok) throw new Error("Health request failed");
-    const health: HealthResponse = await response.json();
-    if (health.status !== "ok") throw new Error("Unexpected health response");
-    status.textContent = "API connected";
-  } catch {
-    status.textContent = "API unavailable";
+function updatePage(): void {
+  const requested = location.hash.slice(1);
+  const activePage = Array.from(pages).find(page => page.id === requested) ?? pages[0];
+  for (const page of pages) page.hidden = page !== activePage;
+  for (const link of links) {
+    if (link.hash === `#${activePage.id}`) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
   }
 }
 
-void checkApi();
+window.addEventListener("hashchange", updatePage);
+updatePage();
+
+const status = document.querySelector<HTMLParagraphElement>("#api-status")!;
+void getHealth().then(
+  () => { status.textContent = "API connected"; },
+  () => { status.textContent = "API unavailable"; },
+);
+
+const facilities = getFacilities();
+void renderFacilities(facilities);
+void initializeReservationForm(facilities);
