@@ -1,0 +1,26 @@
+{
+  "name": "ic217-backend",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --watch src/server.ts",
+    "start": "node src/server.ts",
+    "typecheck": "tsc",
+    "db:init": "node src/db.ts",
+    "db:verify": "node src/db.ts --verify"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.0.0",
+    "dotenv": "^17.0.0",
+    "express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3"
+  }
+}
