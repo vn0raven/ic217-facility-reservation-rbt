@@ -11,7 +11,8 @@
     "typecheck": "tsc",
     "test": "node --test src/backend.test.ts",
     "db:init": "node src/db.ts",
-    "db:verify": "node src/db.ts --verify"
+    "db:verify": "node src/db.ts --verify",
+    "db:seed": "node src/db.ts --seed"
   },
   "dependencies": {
     "better-sqlite3": "^12.0.0",
