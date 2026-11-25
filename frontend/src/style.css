@@ -5,9 +5,9 @@
 }
 
 body { margin: 0; }
-.wrap { width: min(72rem, calc(100% - 2.5rem)); margin-inline: auto; }
+.wrap { width: min(74rem, calc(100% - 2.5rem)); margin-inline: auto; }
 .header { background: #123a35; color: #fff; }
-.header-inner, nav { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem 1.35rem; }
+.header-inner, nav { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem 1.25rem; }
 .header-inner { justify-content: space-between; padding-block: 0.85rem; }
 header a { color: inherit; text-underline-offset: 0.25rem; }
 .brand { font-weight: 750; text-decoration: none; }
@@ -25,9 +25,10 @@ nav a:not([aria-current]) { text-decoration: none; }
 }
 
 main { padding-block: clamp(2rem, 6vw, 4rem); }
-h1, h2, p { margin: 0 0 1rem; }
+h1, h2, h3, p { margin: 0 0 1rem; }
 h1 { font-size: clamp(1.85rem, 4.5vw, 3rem); line-height: 1.12; }
 h2 { font-size: 1.15rem; margin: 0; }
+h3 { font-size: 1.1rem; margin-bottom: 0.65rem; }
 .institution { color: #3c645a; font-weight: 600; }
 #api-status { border-left: 3px solid #28735b; padding-inline-start: 0.75rem; font-weight: 600; }
 .prototype-note {
@@ -39,21 +40,25 @@ h2 { font-size: 1.15rem; margin: 0; }
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11.5rem), 1fr));
   gap: 1rem;
   margin-block: 1.25rem;
 }
 .summary-card { display: flex; flex-direction: column; gap: 0.25rem; }
 .summary-label { font-size: 0.9rem; color: #3d5952; font-weight: 600; }
 .summary-card strong { font-size: 1.9rem; line-height: 1.1; color: #123a35; }
+.summary-card .metric-text { font-size: 1.15rem; padding-top: 0.35rem; overflow-wrap: anywhere; }
 
 .dashboard-actions, .button-row { display: flex; flex-wrap: wrap; gap: 0.65rem; }
 
 #facility-status:empty,
+#facility-form-status:empty,
 #form-status:empty,
 #reservations-status:empty,
 #schedule-status:empty,
-#block-form-status:empty {
+#block-form-status:empty,
+#tree-status:empty,
+#probe-status:empty {
   display: none;
 }
 [data-tone="error"] { color: #9b1c1c; font-weight: 600; }
@@ -67,7 +72,6 @@ h2 { font-size: 1.15rem; margin: 0; }
   margin: 0;
   padding: 0;
 }
-.card-grid h2 { margin-bottom: 0.75rem; }
 
 .reservation-stack {
   list-style: none;
@@ -102,13 +106,13 @@ h2 { font-size: 1.15rem; margin: 0; }
 .badge-rejected { background: #fee2e2; color: #991b1b; }
 .badge-cancelled { background: #e5e7eb; color: #374151; }
 
-dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; margin: 0; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; margin: 0; }
 dt { font-weight: 600; color: #36524b; }
 dd { margin: 0; overflow-wrap: anywhere; }
 
 form { max-width: 34rem; }
 label { display: block; font-weight: 600; }
-input, select, textarea {
+input:not([type="checkbox"]), select, textarea {
   box-sizing: border-box;
   width: 100%;
   margin: 0.25rem 0 1rem;
@@ -119,18 +123,30 @@ input, select, textarea {
   background: #fff;
   font: inherit;
 }
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding-bottom: 0.45rem;
+}
+.checkbox-inline input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+}
 .form-times { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
 
 .filter-bar, .schedule-toolbar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
   gap: 0.85rem 1rem;
   align-items: end;
   margin-bottom: 1.25rem;
 }
 .filter-bar select,
 .schedule-toolbar select,
-.schedule-toolbar input {
+.schedule-toolbar input:not([type="checkbox"]) {
   margin-bottom: 0;
 }
 .toolbar-buttons {
@@ -168,8 +184,31 @@ input, select, textarea {
   padding: 0.75rem;
 }
 .slot-title { font-weight: 650; margin-bottom: 0.3rem; }
-.slot-meta { font-size: 0.88rem; color: #3d5952; margin-bottom: 0; }
-.slot-empty { font-size: 0.9rem; color: #5b726b; margin: 0; }
+.slot-meta { font-size: 0.9rem; color: #3d5952; margin-bottom: 0.75rem; }
+.slot-empty { font-size: 0.92rem; color: #5b726b; margin: 0; }
+
+.tree-canvas-wrap {
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+  background: #fbfdfc;
+  margin-bottom: 1.25rem;
+}
+.rbt-node { cursor: pointer; }
+.visualizer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: 1rem;
+}
+.visualizer-grid form { max-width: none; }
+
+.trace-steps {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+  color: #243b35;
+  font-size: 0.92rem;
+}
+.trace-steps li + li { margin-top: 0.25rem; }
 
 .academic-panel { margin-top: 2.5rem; }
 .academic-panel h2 { font-size: 1.4rem; margin-bottom: 0.5rem; }

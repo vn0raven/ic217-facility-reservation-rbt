@@ -1,8 +1,12 @@
-import { renderFacilities } from "./pages/facilities.ts";
+import { initializeFacilitiesPage } from "./pages/facilities.ts";
 import { initializeReservationForm } from "./pages/reservation.ts";
+import type { ReservationFormController } from "./pages/reservation.ts";
 import { initializeReservationsPage } from "./pages/reservations.ts";
+import type { ReservationsController } from "./pages/reservations.ts";
 import { initializeSchedulePage } from "./pages/schedule.ts";
 import type { ScheduleController } from "./pages/schedule.ts";
+import { initializeVisualizerPage } from "./pages/visualizer.ts";
+import type { VisualizerController } from "./pages/visualizer.ts";
 import { getFacilities, getHealth, getUsers } from "./services/api.ts";
 import { initializeActorSelector } from "./services/session.ts";
 import "./style.css";
@@ -37,28 +41,38 @@ const statAcademic = document.querySelector<HTMLElement>("#stat-academic")!;
 const facilitiesRequest = getFacilities();
 const usersRequest = getUsers();
 
-void facilitiesRequest.then(
-  items => {
-    statFacilities.textContent = String(items.filter(item => item.active).length);
-  },
-  () => {
-    statFacilities.textContent = "–";
-  },
-);
-
-void renderFacilities(facilitiesRequest);
-
 void (async () => {
   const session = await initializeActorSelector(usersRequest);
-  let scheduleController: ScheduleController | undefined;
 
-  const reservationsController = await initializeReservationsPage(
+  let reservationsController: ReservationsController | undefined;
+  let scheduleController: ScheduleController | undefined;
+  let reservationFormController: ReservationFormController | undefined;
+  let visualizerController: VisualizerController | undefined;
+
+  await initializeFacilitiesPage(facilitiesRequest, session, {
+    onFacilitiesChanged(facilities) {
+      statFacilities.textContent = String(facilities.filter(item => item.active).length);
+      reservationsController?.setFacilities(facilities);
+      scheduleController?.setFacilities(facilities);
+      reservationFormController?.setFacilities(facilities);
+      visualizerController?.setFacilities(facilities);
+    },
+    onInspectFacilityTree(facilityId) {
+      visualizerController?.selectFacility(facilityId);
+      location.hash = "#visualizer";
+    },
+  });
+
+  visualizerController = await initializeVisualizerPage(facilitiesRequest);
+
+  reservationsController = await initializeReservationsPage(
     facilitiesRequest,
     session,
     reservations => {
       statPending.textContent = String(reservations.filter(r => r.status === "pending").length);
       statApproved.textContent = String(reservations.filter(r => r.status === "confirmed").length);
       void scheduleController?.refresh();
+      void visualizerController?.refresh();
     },
   );
 
@@ -67,10 +81,11 @@ void (async () => {
     session,
     academicCount => {
       statAcademic.textContent = String(academicCount);
+      void visualizerController?.refresh();
     },
   );
 
-  await initializeReservationForm(facilitiesRequest, session, () =>
-    reservationsController.refresh(),
+  reservationFormController = await initializeReservationForm(facilitiesRequest, session, () =>
+    reservationsController!.refresh(),
   );
 })();
