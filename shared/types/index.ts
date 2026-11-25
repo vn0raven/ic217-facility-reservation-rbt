@@ -24,6 +24,21 @@ export interface Facility {
   active: boolean;
 }
 
+export interface CreateFacilityInput {
+  actorUserId: number;
+  name: string;
+  location: string | null;
+  capacity: number | null;
+  active?: boolean;
+}
+
+export interface UpdateFacilityInput {
+  actorUserId: number;
+  location?: string | null;
+  capacity?: number | null;
+  active?: boolean;
+}
+
 export interface ScheduleInterval {
   facilityId: number;
   start: number;
@@ -99,4 +114,49 @@ export interface AvailabilityCheckResult {
   end: number;
   available: boolean;
   conflict: FacilityScheduleItem | null;
+}
+
+export interface FacilityTreeNodeView {
+  key: {
+    start: number;
+    id: string;
+  };
+  color: "red" | "black";
+  parentId: string | null;
+  leftId: string | null;
+  rightId: string | null;
+  depth: number;
+  blackDepth: number;
+  item: FacilityScheduleItem;
+}
+
+export interface FacilityTreeOperationEntry {
+  sequence: number;
+  timestamp: number;
+  operation: "rebuild" | "insert" | "delete";
+  keyId: string;
+  summary: string;
+  steps: string[];
+}
+
+export interface FacilityTreeSnapshotView {
+  facilityId: number;
+  size: number;
+  height: number;
+  blackHeight: number;
+  invariantsValid: boolean;
+  rootId: string | null;
+  nodes: FacilityTreeNodeView[];
+  operations: FacilityTreeOperationEntry[];
+}
+
+export interface FacilityTreeLookupView {
+  facilityId: number;
+  probeStart: number;
+  probeEnd: number;
+  predecessorId: string | null;
+  successorId: string | null;
+  lowerBoundId: string | null;
+  conflictId: string | null;
+  available: boolean;
 }

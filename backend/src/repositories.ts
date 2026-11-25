@@ -27,6 +27,16 @@ export function createRepositories(db: Database.Database) {
   const facility = db.prepare<[number], FacilityRow>(
     "SELECT id, name, location, capacity, active FROM facilities WHERE id = ?",
   );
+  const facilityByName = db.prepare<[string], FacilityRow>(
+    "SELECT id, name, location, capacity, active FROM facilities WHERE name = ?",
+  );
+  const insertFacility = db.prepare<[string, string | null, number | null, 0 | 1]>(
+    "INSERT INTO facilities (name, location, capacity, active) VALUES (?, ?, ?, ?)",
+  );
+  const updateFacilityRow = db.prepare<[string | null, number | null, 0 | 1, number]>(
+    "UPDATE facilities SET location = ?, capacity = ?, active = ? WHERE id = ?",
+  );
+
   const users = db.prepare<[], User>(
     "SELECT id, name, email, role, department FROM users ORDER BY id",
   );
@@ -80,6 +90,38 @@ export function createRepositories(db: Database.Database) {
     getFacility(id: number) {
       const row = facility.get(id);
       return row && toFacility(row);
+    },
+    getFacilityByName(name: string) {
+      const row = facilityByName.get(name);
+      return row && toFacility(row);
+    },
+    createFacility(input: {
+      name: string;
+      location: string | null;
+      capacity: number | null;
+      active: boolean;
+    }): Facility {
+      const info = insertFacility.run(
+        input.name.trim(),
+        input.location === null ? null : input.location.trim(),
+        input.capacity,
+        input.active ? 1 : 0,
+      );
+      return toFacility(facility.get(Number(info.lastInsertRowid))!);
+    },
+    updateFacility(
+      id: number,
+      patch: { location?: string | null; capacity?: number | null; active?: boolean },
+    ): Facility | undefined {
+      const current = facility.get(id);
+      if (!current) return undefined;
+      const nextLocation = patch.location !== undefined
+        ? (patch.location === null ? null : patch.location.trim())
+        : current.location;
+      const nextCapacity = patch.capacity !== undefined ? patch.capacity : current.capacity;
+      const nextActive: 0 | 1 = patch.active !== undefined ? (patch.active ? 1 : 0) : current.active;
+      updateFacilityRow.run(nextLocation, nextCapacity, nextActive, id);
+      return toFacility(facility.get(id)!);
     },
     getReservation: (id: number) => reservationById.get(id),
     listReservations(filter?: number | ReservationFilters): Reservation[] {

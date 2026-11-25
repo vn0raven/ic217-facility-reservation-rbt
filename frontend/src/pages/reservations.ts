@@ -12,6 +12,7 @@ import { formatRoleLabel, formatStatusLabel } from "../services/time.ts";
 
 export interface ReservationsController {
   refresh(): Promise<void>;
+  setFacilities(facilities: Facility[]): void;
 }
 
 export async function initializeReservationsPage(
@@ -22,6 +23,7 @@ export async function initializeReservationsPage(
   const actorBanner = document.querySelector<HTMLParagraphElement>("#reservations-actor-hint")!;
   const facilityFilter = document.querySelector<HTMLSelectElement>("#filter-facility")!;
   const statusFilter = document.querySelector<HTMLSelectElement>("#filter-status")!;
+  const mineFilter = document.querySelector<HTMLInputElement>("#filter-mine")!;
   const refreshButton = document.querySelector<HTMLButtonElement>("#refresh-reservations")!;
   const feedback = document.querySelector<HTMLParagraphElement>("#reservations-status")!;
   const list = document.querySelector<HTMLUListElement>("#reservation-list")!;
@@ -29,10 +31,21 @@ export async function initializeReservationsPage(
   let facilitiesById = new Map<number, Facility>();
   let latestReservations: Reservation[] = [];
 
-  try {
-    const facilities = await facilitiesRequest;
+  function setFacilities(facilities: Facility[]): void {
+    const previous = facilityFilter.value;
     facilitiesById = new Map(facilities.map(item => [item.id, item]));
-    facilityFilter.append(...facilities.map(item => new Option(item.name, String(item.id))));
+    facilityFilter.replaceChildren(
+      new Option("All facilities", ""),
+      ...facilities.map(item => new Option(item.name, String(item.id))),
+    );
+    if (facilities.some(item => String(item.id) === previous)) {
+      facilityFilter.value = previous;
+    }
+    renderList();
+  }
+
+  try {
+    setFacilities(await facilitiesRequest);
   } catch {
     // Facility filter remains at "All facilities" if initial fetch failed.
   }
@@ -53,10 +66,12 @@ export async function initializeReservationsPage(
     const actor = session.getActor();
     const selectedFacility = facilityFilter.value ? Number(facilityFilter.value) : undefined;
     const selectedStatus = (statusFilter.value || undefined) as ReservationStatus | undefined;
+    const onlyMine = mineFilter.checked;
 
     const filtered = latestReservations.filter(item => {
       if (selectedFacility !== undefined && item.facilityId !== selectedFacility) return false;
       if (selectedStatus !== undefined && item.status !== selectedStatus) return false;
+      if (onlyMine && actor && item.userId !== actor.id) return false;
       return true;
     });
 
@@ -123,6 +138,7 @@ export async function initializeReservationsPage(
 
   facilityFilter.addEventListener("change", renderList);
   statusFilter.addEventListener("change", renderList);
+  mineFilter.addEventListener("change", renderList);
   refreshButton.addEventListener("click", () => {
     feedback.textContent = "";
     delete feedback.dataset.tone;
@@ -135,5 +151,5 @@ export async function initializeReservationsPage(
   });
 
   await refresh();
-  return { refresh };
+  return { refresh, setFacilities };
 }

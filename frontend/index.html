@@ -15,6 +15,7 @@
           <a href="#schedule">Schedule</a>
           <a href="#reservation">Request facility</a>
           <a href="#reservations">Reservations</a>
+          <a href="#visualizer">RBT Visualizer</a>
         </nav>
         <div class="actor-switcher">
           <label for="actor-select">Demo role</label>
@@ -30,7 +31,7 @@
         <h1 id="dashboard-title">Campus Facility Reservations</h1>
         <p>
           Browse department facilities, view daily and weekly schedules backed by per-facility
-          Red-Black Trees, submit reservation requests in Asia/Manila time, and prevent
+          Red-Black Trees, inspect live colored node topologies and balancing traces, and prevent
           double-booking across classes and events.
         </p>
         <p id="api-status" role="status">Checking API connection…</p>
@@ -57,7 +58,8 @@
           </div>
         </div>
         <div class="dashboard-actions">
-          <a class="button" href="#schedule">View schedules</a>
+          <a class="button" href="#visualizer">Inspect Red-Black Tree</a>
+          <a class="button btn-secondary-link" href="#schedule">View schedules</a>
           <a class="button btn-secondary-link" href="#facilities">Browse facilities</a>
           <a class="button btn-secondary-link" href="#reservation">Request a facility</a>
           <a class="button btn-secondary-link" href="#reservations">Manage reservations</a>
@@ -68,6 +70,21 @@
         <h1 id="facilities-title">Facilities</h1>
         <p id="facility-status" role="status">Loading facilities…</p>
         <ul id="facility-list" class="card-grid"></ul>
+
+        <div class="academic-panel">
+          <h2>Manage facilities</h2>
+          <p id="facility-form-hint" class="requester-banner"></p>
+          <form id="facility-form" class="panel">
+            <label for="new-facility-name">Facility name</label>
+            <input id="new-facility-name" type="text" maxlength="80" placeholder="e.g., IC Lecture Room 102" required>
+            <label for="new-facility-location">Location (optional)</label>
+            <input id="new-facility-location" type="text" maxlength="120" placeholder="e.g., IC Building, 1st Floor">
+            <label for="new-facility-capacity">Capacity (optional)</label>
+            <input id="new-facility-capacity" type="number" min="1" step="1" placeholder="e.g., 40">
+            <p id="facility-form-status" role="status"></p>
+            <button type="submit" disabled>Add facility</button>
+          </form>
+        </div>
       </section>
 
       <section id="schedule" aria-labelledby="schedule-title" hidden>
@@ -182,12 +199,105 @@
               <option value="cancelled">Cancelled</option>
             </select>
           </div>
+          <label class="checkbox-inline" for="filter-mine">
+            <input id="filter-mine" type="checkbox">
+            Only my requests
+          </label>
           <div class="filter-actions">
             <button id="refresh-reservations" type="button" class="btn-secondary">Refresh</button>
           </div>
         </div>
         <p id="reservations-status" role="status">Loading reservations…</p>
         <ul id="reservation-list" class="reservation-stack"></ul>
+      </section>
+
+      <section id="visualizer" aria-labelledby="visualizer-title" hidden>
+        <h1 id="visualizer-title">Red-Black Tree visualizer</h1>
+        <p>
+          Live structural snapshot exported directly from the selected facility's in-memory
+          <code>RedBlackTree&lt;ScheduleKey, ScheduledRecord&gt;</code>. Click any node to inspect
+          its keys, colors, parent-child pointers, and black depth.
+        </p>
+
+        <div class="panel schedule-toolbar">
+          <div>
+            <label for="tree-facility">Facility tree</label>
+            <select id="tree-facility">
+              <option value="">Loading facilities…</option>
+            </select>
+          </div>
+          <label class="checkbox-inline" for="tree-show-nil">
+            <input id="tree-show-nil" type="checkbox" checked>
+            Show black NIL sentinel leaves
+          </label>
+          <div class="filter-actions">
+            <button id="tree-refresh" type="button" class="btn-secondary">Refresh snapshot</button>
+          </div>
+        </div>
+
+        <div class="summary-grid tree-metrics" aria-label="Red-Black Tree properties">
+          <div class="panel summary-card">
+            <span class="summary-label">Indexed nodes</span>
+            <strong id="tree-stat-size">–</strong>
+          </div>
+          <div class="panel summary-card">
+            <span class="summary-label">Tree height</span>
+            <strong id="tree-stat-height">–</strong>
+          </div>
+          <div class="panel summary-card">
+            <span class="summary-label">Black height</span>
+            <strong id="tree-stat-bh">–</strong>
+          </div>
+          <div class="panel summary-card">
+            <span class="summary-label">Root key</span>
+            <strong id="tree-stat-root" class="metric-text">–</strong>
+          </div>
+          <div class="panel summary-card">
+            <span class="summary-label">RB invariants</span>
+            <strong id="tree-stat-valid" class="metric-text">–</strong>
+          </div>
+        </div>
+
+        <p id="tree-status" role="status"></p>
+        <div id="tree-canvas-wrap" class="panel tree-canvas-wrap"></div>
+
+        <div class="visualizer-grid">
+          <div id="tree-node-inspector" class="panel"></div>
+
+          <form id="tree-probe-form" class="panel">
+            <h3>Probe predecessor / successor</h3>
+            <p class="slot-meta">
+              Test an interval in Asia/Manila time to highlight <code>predecessor</code> (blue),
+              <code>successor</code> (teal), and any <code>conflict</code> (amber) on the live tree.
+            </p>
+            <label for="probe-date">Probe date</label>
+            <input id="probe-date" type="date" required>
+            <div class="form-times">
+              <div>
+                <label for="probe-start">Start time</label>
+                <input id="probe-start" type="time" required>
+              </div>
+              <div>
+                <label for="probe-end">End time</label>
+                <input id="probe-end" type="time" required>
+              </div>
+            </div>
+            <p id="probe-status" role="status"></p>
+            <div class="button-row">
+              <button type="submit">Probe tree neighbors</button>
+              <button id="probe-clear" type="button" class="btn-secondary">Clear highlight</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="academic-panel">
+          <h2>Operation and balancing trace</h2>
+          <p class="slot-meta">
+            Recorded insertions, deletions, rotations, and recolorings executed on this facility's
+            Red-Black Tree (most recent first).
+          </p>
+          <ol id="tree-operations-list" class="reservation-stack"></ol>
+        </div>
       </section>
     </main>
     <script type="module" src="/src/main.ts"></script>

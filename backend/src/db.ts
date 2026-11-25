@@ -238,10 +238,22 @@ export function seedDemoData(
         end: mondayStart + 0 * DAY_MS + 10 * HOUR_MS,
       },
       {
+        facilityName: "IC Lecture Room 101",
+        title: "CS 212 – Discrete Structures II",
+        start: mondayStart + 1 * DAY_MS + 10 * HOUR_MS,
+        end: mondayStart + 1 * DAY_MS + 12 * HOUR_MS,
+      },
+      {
         facilityName: "Programming Laboratory 1",
         title: "IC 217 – Red-Black Tree Laboratory",
         start: mondayStart + 2 * DAY_MS + 9 * HOUR_MS,
         end: mondayStart + 2 * DAY_MS + 12 * HOUR_MS,
+      },
+      {
+        facilityName: "IC Lecture Room 101",
+        title: "IC 215 – Design and Analysis of Algorithms",
+        start: mondayStart + 3 * DAY_MS + 8 * HOUR_MS,
+        end: mondayStart + 3 * DAY_MS + 10 * HOUR_MS,
       },
       {
         facilityName: "IC Lecture Room 101",

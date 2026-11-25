@@ -436,7 +436,7 @@ test("supports Phase 4 academic schedule blocking, availability checks, and RBT 
     seedDemoData(db, { seedScheduleBlocks: true, referenceTimeMs: referenceMs });
 
     const repositories = createRepositories(db);
-    assert.equal(repositories.listAcademicBlocks().length, 3);
+    assert.equal(repositories.listAcademicBlocks().length, 5);
 
     const users = repositories.listUsers();
     const student = users.find(u => u.role === "student")!;
@@ -595,6 +595,171 @@ test("supports Phase 4 academic schedule blocking, availability checks, and RBT 
       assert.equal(rebuilt.verifyAllInvariants(), true);
       assert.equal(rebuilt.getFacilityTreeSize(room.id), 1);
       assert.equal((await request("GET", `facilities/${ dayStart ? room.id : 0 }/schedule?start=${dayStart}&end=${dayEnd}`)).json.data.length, 1);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test("supports Phase 5 facility management, live RBT snapshot export, and neighbor lookup", async () => {
+  const db = openDatabase(":memory:");
+  try {
+    seedDemoData(db);
+    const repositories = createRepositories(db);
+    const users = repositories.listUsers();
+    const student = users.find(u => u.role === "student")!;
+    const personnel = users.find(u => u.role === "personnel")!;
+
+    const scheduleIndex = createScheduleIndex(repositories);
+    const server = createApp(repositories, scheduleIndex).listen(0, "127.0.0.1");
+    try {
+      await once(server, "listening");
+      const address = server.address();
+      assert(address && typeof address !== "string");
+      const base = `http://127.0.0.1:${address.port}/api`;
+
+      async function request(method: string, path: string, body?: unknown) {
+        const res = await fetch(`${base}/${path}`, {
+          method,
+          headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        return { status: res.status, json: await res.json() };
+      }
+
+      // Non-personnel cannot create facilities
+      assert.equal(
+        (await request("POST", "facilities", {
+          actorUserId: student.id,
+          name: "Unauthorized Lab",
+          location: "IC Bldg",
+          capacity: 30,
+        })).status,
+        403,
+      );
+
+      // Personnel creates a new facility; duplicate name returns 409
+      const createdFacility = await request("POST", "facilities", {
+        actorUserId: personnel.id,
+        name: "  AI Research Studio  ",
+        location: "  IC Building, 3rd Floor  ",
+        capacity: 25,
+      });
+      assert.equal(createdFacility.status, 201);
+      assert.equal(createdFacility.json.data.name, "AI Research Studio");
+      assert.equal(createdFacility.json.data.active, true);
+      const studioId: number = createdFacility.json.data.id;
+
+      assert.equal(
+        (await request("POST", "facilities", {
+          actorUserId: personnel.id,
+          name: "ai research studio",
+          location: null,
+          capacity: 25,
+        })).json.error.code,
+        "FACILITY_EXISTS",
+      );
+
+      // Deactivating blocks new requests; reactivating re-enables them
+      const deactivated = await request("PATCH", `facilities/${studioId}`, {
+        actorUserId: personnel.id,
+        active: false,
+      });
+      assert.equal(deactivated.status, 200);
+      assert.equal(deactivated.json.data.active, false);
+
+      assert.equal(
+        (await request("POST", "reservations", {
+          userId: student.id,
+          facilityId: studioId,
+          start: 1000,
+          end: 2000,
+          purpose: "Blocked while inactive",
+        })).json.error.code,
+        "FACILITY_INACTIVE",
+      );
+
+      const reactivated = await request("PATCH", `facilities/${studioId}`, {
+        actorUserId: personnel.id,
+        active: true,
+        capacity: 30,
+      });
+      assert.equal(reactivated.status, 200);
+      assert.equal(reactivated.json.data.active, true);
+      assert.equal(reactivated.json.data.capacity, 30);
+
+      // Populate 4 ordered slots (2 academic blocks + 2 approved reservations) to trigger rotation + recoloring
+      const b1 = await request("POST", "academic-blocks", {
+        actorUserId: personnel.id,
+        facilityId: studioId,
+        title: "Slot 1",
+        start: 1000,
+        end: 2000,
+      });
+      const r2 = await request("POST", "reservations", {
+        userId: student.id,
+        facilityId: studioId,
+        start: 2000,
+        end: 3000,
+        purpose: "Slot 2",
+      });
+      await request("PATCH", `reservations/${r2.json.data.id}/status`, {
+        actorUserId: personnel.id,
+        action: "approve",
+      });
+      const b3 = await request("POST", "academic-blocks", {
+        actorUserId: personnel.id,
+        facilityId: studioId,
+        title: "Slot 3",
+        start: 3000,
+        end: 4000,
+      });
+      const r4 = await request("POST", "reservations", {
+        userId: student.id,
+        facilityId: studioId,
+        start: 5000,
+        end: 6000,
+        purpose: "Slot 4",
+      });
+      await request("PATCH", `reservations/${r4.json.data.id}/status`, {
+        actorUserId: personnel.id,
+        action: "approve",
+      });
+
+      const treeRes = await request("GET", `facilities/${studioId}/tree`);
+      assert.equal(treeRes.status, 200);
+      const tree = treeRes.json.data;
+      assert.equal(tree.size, 4);
+      assert.equal(tree.height, 3);
+      assert.equal(tree.blackHeight, 2);
+      assert.equal(tree.invariantsValid, true);
+      assert.equal(tree.rootId, `reservation:${r2.json.data.id}`);
+      assert.equal(tree.nodes.some((n: { color: string }) => n.color === "red"), true);
+      assert.equal(tree.nodes.some((n: { color: string }) => n.color === "black"), true);
+      assert.equal(tree.operations.length >= 5, true);
+
+      // Neighbor probe in open gap [4000, 5000) vs conflicting [2500, 3500)
+      const gapLookup = await request("GET", `facilities/${studioId}/tree/lookup?start=4000&end=5000`);
+      assert.equal(gapLookup.status, 200);
+      assert.deepEqual(gapLookup.json.data, {
+        facilityId: studioId,
+        probeStart: 4000,
+        probeEnd: 5000,
+        predecessorId: `academic:${b3.json.data.id}`,
+        successorId: `reservation:${r4.json.data.id}`,
+        lowerBoundId: `reservation:${r4.json.data.id}`,
+        conflictId: null,
+        available: true,
+      });
+
+      const hitLookup = await request("GET", `facilities/${studioId}/tree/lookup?start=2500&end=3500`);
+      assert.equal(hitLookup.status, 200);
+      assert.equal(hitLookup.json.data.available, false);
+      assert.equal(hitLookup.json.data.predecessorId, `reservation:${r2.json.data.id}`);
+      assert.equal(hitLookup.json.data.conflictId, `reservation:${r2.json.data.id}`);
+      assert.equal(b1.status, 201);
     } finally {
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     }

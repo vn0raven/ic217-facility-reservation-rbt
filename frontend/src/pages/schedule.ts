@@ -20,6 +20,7 @@ import {
 
 export interface ScheduleController {
   refresh(): Promise<void>;
+  setFacilities(facilities: Facility[]): void;
 }
 
 type ViewMode = "daily" | "weekly";
@@ -60,8 +61,10 @@ export async function initializeSchedulePage(
   dateInput.value = initialDate;
   blockDate.value = initialDate;
 
-  try {
-    facilities = await facilitiesRequest;
+  function applyFacilityOptions(items: Facility[]): void {
+    facilities = items;
+    const prevSchedule = facilitySelect.value;
+    const prevBlock = blockFacility.value;
     facilitySelect.replaceChildren();
     blockFacility.replaceChildren();
 
@@ -73,8 +76,11 @@ export async function initializeSchedulePage(
         const suffix = item.active ? "" : " (Inactive)";
         facilitySelect.append(new Option(`${item.name}${suffix}`, String(item.id)));
       }
-      const firstActive = facilities.find(item => item.active) ?? facilities[0];
-      facilitySelect.value = String(firstActive.id);
+      const fallback = facilities.find(item => item.active) ?? facilities[0];
+      facilitySelect.value = facilities.some(item => String(item.id) === prevSchedule)
+        ? prevSchedule
+        : String(fallback.id);
+      facilitySelect.disabled = false;
     }
 
     const activeFacilities = facilities.filter(item => item.active);
@@ -86,7 +92,15 @@ export async function initializeSchedulePage(
       for (const item of activeFacilities) {
         blockFacility.append(new Option(item.name, String(item.id)));
       }
+      if (activeFacilities.some(item => String(item.id) === prevBlock)) {
+        blockFacility.value = prevBlock;
+      }
     }
+    syncBlockFormPermissions();
+  }
+
+  try {
+    applyFacilityOptions(await facilitiesRequest);
   } catch {
     facilitySelect.replaceChildren(new Option("Facilities unavailable", ""));
     facilitySelect.disabled = true;
@@ -389,5 +403,11 @@ export async function initializeSchedulePage(
 
   updateModeButtons();
   await refresh();
-  return { refresh };
+  return {
+    refresh,
+    setFacilities(updated: Facility[]) {
+      applyFacilityOptions(updated);
+      void refresh();
+    },
+  };
 }

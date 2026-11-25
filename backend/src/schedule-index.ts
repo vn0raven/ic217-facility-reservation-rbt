@@ -1,7 +1,14 @@
 import { compareScheduleKeys, RedBlackTree } from "../../src/structures/red-black-tree.ts";
-import type { ScheduleKey } from "../../src/structures/red-black-tree.ts";
-import type { AcademicScheduleBlock, Reservation } from "../../shared/types/index.ts";
+import type { ScheduleKey, TreeSnapshot } from "../../src/structures/red-black-tree.ts";
+import type {
+  AcademicScheduleBlock,
+  FacilityTreeLookupView,
+  FacilityTreeOperationEntry,
+  Reservation,
+} from "../../shared/types/index.ts";
 import type { createRepositories } from "./repositories.ts";
+
+const MAX_OPERATION_HISTORY = 20;
 
 export interface ScheduledRecord {
   readonly kind: "reservation" | "academic";
@@ -21,6 +28,33 @@ export function toScheduleKey(
 
 export function createScheduleIndex(repositories: ReturnType<typeof createRepositories>) {
   const trees = new Map<number, RedBlackTree<ScheduleKey, ScheduledRecord>>();
+  const operationLogs = new Map<number, FacilityTreeOperationEntry[]>();
+  let sequence = 0;
+
+  function appendLog(
+    facilityId: number,
+    operation: FacilityTreeOperationEntry["operation"],
+    keyId: string,
+    summary: string,
+    steps: ReadonlyArray<string>,
+  ): void {
+    let list = operationLogs.get(facilityId);
+    if (!list) {
+      list = [];
+      operationLogs.set(facilityId, list);
+    }
+    list.push({
+      sequence: ++sequence,
+      timestamp: Date.now(),
+      operation,
+      keyId,
+      summary,
+      steps: [...steps],
+    });
+    if (list.length > MAX_OPERATION_HISTORY) {
+      list.splice(0, list.length - MAX_OPERATION_HISTORY);
+    }
+  }
 
   function ensureTree(facilityId: number): RedBlackTree<ScheduleKey, ScheduledRecord> {
     let tree = trees.get(facilityId);
@@ -53,6 +87,7 @@ export function createScheduleIndex(repositories: ReturnType<typeof createReposi
       toScheduleKey(b.kind, b.recordId, b.start),
     ));
 
+    const collectedSteps: string[] = [];
     let previousEnd = Number.NEGATIVE_INFINITY;
     for (const record of records) {
       if (record.start < previousEnd) {
@@ -65,6 +100,7 @@ export function createScheduleIndex(repositories: ReturnType<typeof createReposi
       if (!inserted) {
         throw new Error(`Duplicate schedule key ${record.kind}:${record.recordId} for facility ${facilityId}.`);
       }
+      collectedSteps.push(...tree.getLastOperationSteps());
       previousEnd = record.end;
     }
 
@@ -72,11 +108,21 @@ export function createScheduleIndex(repositories: ReturnType<typeof createReposi
       throw new Error(`Red-Black Tree invariant check failed for facility ${facilityId}.`);
     }
     trees.set(facilityId, tree);
+    appendLog(
+      facilityId,
+      "rebuild",
+      `facility:${facilityId}`,
+      records.length === 0
+        ? "Initialized empty Red-Black Tree from SQLite"
+        : `Reconstructed Red-Black Tree from SQLite with ${records.length} active interval(s)`,
+      collectedSteps.length > 0 ? collectedSteps : ["Tree empty; black NIL sentinel active"],
+    );
     return tree;
   }
 
   function rebuildAll(): void {
     trees.clear();
+    operationLogs.clear();
     for (const facility of repositories.listFacilities()) {
       buildFacilityTree(facility.id);
     }
@@ -128,19 +174,76 @@ export function createScheduleIndex(repositories: ReturnType<typeof createReposi
       if (!inserted || !tree.verifyInvariants()) {
         throw new Error(`Failed to update schedule tree for ${record.kind}:${record.recordId}.`);
       }
+      appendLog(
+        record.facilityId,
+        "insert",
+        key.id,
+        `Inserted ${key.id} into facility tree (size = ${tree.size})`,
+        tree.getLastOperationSteps(),
+      );
     } catch (error) {
       buildFacilityTree(record.facilityId);
       throw error;
     }
   }
 
-  function removeRecord(kind: "reservation" | "academic", facilityId: number, recordId: number, start: number): void {
+  function removeRecord(
+    kind: "reservation" | "academic",
+    facilityId: number,
+    recordId: number,
+    start: number,
+  ): void {
     const tree = trees.get(facilityId);
     if (!tree) return;
-    const removed = tree.delete(toScheduleKey(kind, recordId, start));
+    const key = toScheduleKey(kind, recordId, start);
+    const removed = tree.delete(key);
     if (!removed || !tree.verifyInvariants()) {
       buildFacilityTree(facilityId);
+      return;
     }
+    appendLog(
+      facilityId,
+      "delete",
+      key.id,
+      `Deleted ${key.id} from facility tree (size = ${tree.size})`,
+      tree.getLastOperationSteps(),
+    );
+  }
+
+  function exportFacilitySnapshot(facilityId: number): {
+    snapshot: TreeSnapshot<ScheduleKey, ScheduledRecord>;
+    operations: FacilityTreeOperationEntry[];
+  } {
+    const tree = ensureTree(facilityId);
+    const history = operationLogs.get(facilityId) ?? [];
+    return {
+      snapshot: tree.exportSnapshot(),
+      operations: [...history].reverse(),
+    };
+  }
+
+  function inspectProbe(
+    facilityId: number,
+    probeStart: number,
+    probeEnd: number,
+  ): FacilityTreeLookupView {
+    const tree = ensureTree(facilityId);
+    const probe: ScheduleKey = { start: probeStart, id: "" };
+    const previous = tree.predecessor(probe);
+    const next = tree.successor(probe);
+    const lower = tree.lowerBound(probe);
+    const conflict = findConflict(facilityId, probeStart, probeEnd);
+
+    return {
+      facilityId,
+      probeStart,
+      probeEnd,
+      predecessorId: previous?.key.id ?? null,
+      successorId: next?.key.id ?? null,
+      lowerBoundId: lower?.key.id ?? null,
+      conflictId: conflict ? `${conflict.kind}:${conflict.recordId}` : null,
+      available: !conflict,
+    };
   }
 
   rebuildAll();
@@ -148,6 +251,11 @@ export function createScheduleIndex(repositories: ReturnType<typeof createReposi
   return {
     findConflict,
     queryWindow,
+    exportFacilitySnapshot,
+    inspectProbe,
+    registerFacility(facilityId: number): void {
+      buildFacilityTree(facilityId);
+    },
     insertConfirmedReservation(reservation: Reservation): void {
       insertRecord({
         kind: "reservation",

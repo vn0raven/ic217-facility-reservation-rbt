@@ -9,11 +9,15 @@ import {
   todayManilaDateString,
 } from "../services/time.ts";
 
+export interface ReservationFormController {
+  setFacilities(facilities: Facility[]): void;
+}
+
 export async function initializeReservationForm(
   facilitiesRequest: Promise<Facility[]>,
   session: ActorSession,
   onCreated: () => Promise<void>,
-): Promise<void> {
+): Promise<ReservationFormController> {
   const form = document.querySelector<HTMLFormElement>("#reservation-form")!;
   const requesterNote = document.querySelector<HTMLParagraphElement>("#form-requester")!;
   const facility = document.querySelector<HTMLSelectElement>("#facility")!;
@@ -39,6 +43,20 @@ export async function initializeReservationForm(
     }
     checkButton.disabled = busy || activeFacilityCount === 0;
     submitButton.disabled = busy || activeFacilityCount === 0 || !actor;
+  }
+
+  function setFacilities(items: Facility[]): void {
+    const previousValue = facility.value;
+    const active = items.filter(item => item.active);
+    activeFacilityCount = active.length;
+    facility.replaceChildren(
+      new Option(active.length ? "Choose a facility" : "No active facilities", ""),
+      ...active.map(item => new Option(item.name, String(item.id))),
+    );
+    if (active.some(item => String(item.id) === previousValue)) {
+      facility.value = previousValue;
+    }
+    syncFormState();
   }
 
   function validateSelectedInterval(): { facilityId: number; startMs: number; endMs: number } | undefined {
@@ -153,15 +171,13 @@ export async function initializeReservationForm(
   });
 
   try {
-    const active = (await facilitiesRequest).filter(item => item.active);
-    activeFacilityCount = active.length;
-    facility.options[0].text = active.length ? "Choose a facility" : "No active facilities";
-    facility.append(...active.map(item => new Option(item.name, String(item.id))));
-    syncFormState();
+    setFacilities(await facilitiesRequest);
   } catch {
-    facility.options[0].text = "Facilities unavailable";
+    facility.replaceChildren(new Option("Facilities unavailable", ""));
     feedback.dataset.tone = "error";
     feedback.textContent = "Unable to load facilities. Refresh the page to try again.";
     syncFormState();
   }
+
+  return { setFacilities };
 }

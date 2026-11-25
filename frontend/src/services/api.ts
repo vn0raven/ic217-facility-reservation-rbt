@@ -3,13 +3,17 @@ import type {
   ApiResponse,
   AvailabilityCheckResult,
   CreateAcademicBlockInput,
+  CreateFacilityInput,
   CreateReservationInput,
   DeleteAcademicBlockInput,
   Facility,
   FacilityScheduleItem,
+  FacilityTreeLookupView,
+  FacilityTreeSnapshotView,
   HealthResponse,
   Reservation,
   ReservationStatus,
+  UpdateFacilityInput,
   UpdateReservationStatusInput,
   User,
 } from "../../../shared/types/index.ts";
@@ -37,6 +41,22 @@ export function getFacilities(): Promise<Facility[]> {
   return requestApi<Facility[]>("/api/facilities");
 }
 
+export function createFacility(input: CreateFacilityInput): Promise<Facility> {
+  return requestApi<Facility>("/api/facilities", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateFacility(id: number, input: UpdateFacilityInput): Promise<Facility> {
+  return requestApi<Facility>(`/api/facilities/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
 export function getFacilitySchedule(
   facilityId: number,
   start: number,
@@ -44,6 +64,21 @@ export function getFacilitySchedule(
 ): Promise<FacilityScheduleItem[]> {
   const params = new URLSearchParams({ start: String(start), end: String(end) });
   return requestApi<FacilityScheduleItem[]>(`/api/facilities/${facilityId}/schedule?${params.toString()}`);
+}
+
+export function getFacilityTree(facilityId: number): Promise<FacilityTreeSnapshotView> {
+  return requestApi<FacilityTreeSnapshotView>(`/api/facilities/${facilityId}/tree`);
+}
+
+export function lookupFacilityTree(
+  facilityId: number,
+  start: number,
+  end: number,
+): Promise<FacilityTreeLookupView> {
+  const params = new URLSearchParams({ start: String(start), end: String(end) });
+  return requestApi<FacilityTreeLookupView>(
+    `/api/facilities/${facilityId}/tree/lookup?${params.toString()}`,
+  );
 }
 
 export function checkAvailability(
