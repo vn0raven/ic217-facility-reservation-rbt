@@ -19,12 +19,11 @@ University of Southeastern Philippines
 
 ## Status
 
-Phase 3 implements the reservation lifecycle: demonstration campus roles
-(`student`, `faculty`, `visitor`, `personnel`), reservation request submission
-in Philippine time (`Asia/Manila` stored as UTC epoch milliseconds), personnel
-approval and rejection, requester/personnel cancellation, and automatic
-insertion/removal of approved (`confirmed`) reservations in per-facility
-Red-Black Trees with half-open `[start, end)` conflict checks.
+Phase 4 completes active facility scheduling and integration: per-facility
+Red-Black Trees reconstructed from SQLite on startup, `O(log n)` predecessor /
+successor conflict checks, `O(log n + k)` range-window queries (`rangeFrom`),
+Department Personnel academic class schedule blocking, live slot availability
+checks, and Daily / Weekly schedule views in `Asia/Manila` time.
 
 ## Local setup
 
@@ -40,9 +39,9 @@ if (-not (Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env
 npm.cmd --prefix backend run db:seed
 ```
 
-`db:seed` idempotently populates four demonstration campus users (one per role)
-and five sample IC facilities so you can submit, approve, reject, and cancel
-reservations immediately.
+`db:seed` idempotently populates four demonstration campus users (one per role),
+five sample IC facilities, and three non-overlapping academic schedule blocks
+for the current `Asia/Manila` week.
 
 The backend defaults to port 3001 without a local `.env`. Keep that port for
 the default Vite proxy. Run each server in a separate PowerShell window from
@@ -56,10 +55,10 @@ npm.cmd --prefix backend run dev
 npm.cmd --prefix frontend run dev
 ```
 
-Open http://127.0.0.1:5173 to reach the dashboard, facility directory,
-reservation request form, and reservation management view. Switch demonstration
-roles in the header selector to test Student, Faculty, Visitor, and Department
-Personnel workflows.
+Open http://127.0.0.1:5173 to reach the dashboard, facility directory, daily
+and weekly schedules, reservation request form, and reservation management
+view. Switch demonstration roles in the header selector to test Student,
+Faculty, Visitor, and Department Personnel workflows.
 
 While both servers are running, request the health and data endpoints directly
 and through the Vite proxy:
@@ -69,6 +68,7 @@ Invoke-RestMethod http://127.0.0.1:3001/api/health
 Invoke-RestMethod http://127.0.0.1:5173/api/health
 Invoke-RestMethod http://127.0.0.1:5173/api/users
 Invoke-RestMethod http://127.0.0.1:5173/api/facilities
+Invoke-RestMethod http://127.0.0.1:5173/api/academic-blocks
 Invoke-RestMethod http://127.0.0.1:3001/api/reservations
 ```
 
@@ -97,15 +97,15 @@ foreign-key constraints, and rolls back the sample rows.
 For a disposable database, set `$env:SQLITE_PATH` to an absolute file path
 before starting the backend or running database scripts.
 
-See [Phase 3 workflow notes](docs/phase-3.md), [Phase 2 API notes](docs/phase-2.md),
-and [Red-Black Tree complexity](docs/red-black-tree.md) for contract and
-algorithm details.
+See [Phase 4 scheduling notes](docs/phase-4.md), [Phase 3 workflow notes](docs/phase-3.md),
+[Phase 2 API notes](docs/phase-2.md), and [Red-Black Tree complexity](docs/red-black-tree.md)
+for contract and algorithm details.
 
 ## Team branches
 
 Use `feature/red-black-tree` for Bon, `feature/backend` for Rai, and
 `feature/frontend` for Sean. Integrate changes into `main` through pull
-requests (for example via `dev/phase3-integration`).
+requests (for example via `dev/phase4-integration`).
 
 See [the Red-Black Tree integration notes](docs/scheduling-integration.md)
 for the scheduling design.
