@@ -12,27 +12,62 @@
         <nav aria-label="Main navigation">
           <a href="#dashboard">Dashboard</a>
           <a href="#facilities">Facilities</a>
-          <a href="#reservation">Reservation form</a>
+          <a href="#reservation">Request facility</a>
+          <a href="#reservations">Reservations</a>
         </nav>
+        <div class="actor-switcher">
+          <label for="actor-select">Demo role</label>
+          <select id="actor-select" aria-label="Select demonstration campus user">
+            <option value="">Loading users…</option>
+          </select>
+        </div>
       </div>
     </header>
     <main class="wrap">
       <section id="dashboard" aria-labelledby="dashboard-title">
         <p class="institution">University of Southeastern Philippines · IC 217</p>
         <h1 id="dashboard-title">Campus Facility Reservations</h1>
-        <p>Browse campus facilities and check the details of a proposed reservation.</p>
+        <p>
+          Browse department facilities, submit reservation requests in Asia/Manila time, and
+          manage approvals with Red-Black Tree conflict protection.
+        </p>
         <p id="api-status" role="status">Checking API connection…</p>
-        <a class="button" href="#facilities">Browse facilities</a>
+        <p class="prototype-note">
+          Prototype demonstration mode: use the <strong>Demo role</strong> selector in the header
+          to switch between Student, Faculty, Visitor, and Department Personnel accounts.
+        </p>
+        <div class="summary-grid" aria-label="System summary">
+          <div class="panel summary-card">
+            <span class="summary-label">Active facilities</span>
+            <strong id="stat-facilities">–</strong>
+          </div>
+          <div class="panel summary-card">
+            <span class="summary-label">Pending requests</span>
+            <strong id="stat-pending">–</strong>
+          </div>
+          <div class="panel summary-card">
+            <span class="summary-label">Approved bookings</span>
+            <strong id="stat-approved">–</strong>
+          </div>
+        </div>
+        <div class="dashboard-actions">
+          <a class="button" href="#facilities">Browse facilities</a>
+          <a class="button btn-secondary-link" href="#reservation">Request a facility</a>
+          <a class="button btn-secondary-link" href="#reservations">Manage reservations</a>
+        </div>
       </section>
+
       <section id="facilities" aria-labelledby="facilities-title" hidden>
         <h1 id="facilities-title">Facilities</h1>
         <p id="facility-status" role="status">Loading facilities…</p>
-        <ul id="facility-list"></ul>
+        <ul id="facility-list" class="card-grid"></ul>
       </section>
+
       <section id="reservation" aria-labelledby="reservation-title" hidden>
-        <h1 id="reservation-title">Reservation form</h1>
-        <p>Check your reservation details before submission becomes available.</p>
+        <h1 id="reservation-title">Request a facility</h1>
+        <p>Times are entered in Philippine Standard Time (Asia/Manila) and stored in UTC.</p>
         <form id="reservation-form" class="panel">
+          <p id="form-requester" class="requester-banner"></p>
           <label for="facility">Facility</label>
           <select id="facility" name="facility" required>
             <option value="">Loading facilities…</option>
@@ -52,8 +87,36 @@
           <label for="purpose">Purpose</label>
           <textarea id="purpose" name="purpose" rows="3" maxlength="250" required></textarea>
           <p id="form-status" role="status"></p>
-          <button type="submit" disabled>Check reservation details</button>
+          <button type="submit" disabled>Submit reservation request</button>
         </form>
+      </section>
+
+      <section id="reservations" aria-labelledby="reservations-title" hidden>
+        <h1 id="reservations-title">Reservations</h1>
+        <p id="reservations-actor-hint" class="requester-banner"></p>
+        <div class="filter-bar panel">
+          <div>
+            <label for="filter-facility">Facility</label>
+            <select id="filter-facility">
+              <option value="">All facilities</option>
+            </select>
+          </div>
+          <div>
+            <label for="filter-status">Status</label>
+            <select id="filter-status">
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div class="filter-actions">
+            <button id="refresh-reservations" type="button" class="btn-secondary">Refresh</button>
+          </div>
+        </div>
+        <p id="reservations-status" role="status">Loading reservations…</p>
+        <ul id="reservation-list" class="reservation-stack"></ul>
       </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
