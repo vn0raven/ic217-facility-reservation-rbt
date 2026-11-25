@@ -427,3 +427,178 @@ test("enforces Phase 3 reservation workflow, role permissions, conflicts, and Re
     db.close();
   }
 });
+
+test("supports Phase 4 academic schedule blocking, availability checks, and RBT window queries", async () => {
+  const db = openDatabase(":memory:");
+  try {
+    const referenceMs = Date.parse("2026-11-30T08:00:00+08:00");
+    seedDemoData(db, { seedScheduleBlocks: true, referenceTimeMs: referenceMs });
+    seedDemoData(db, { seedScheduleBlocks: true, referenceTimeMs: referenceMs });
+
+    const repositories = createRepositories(db);
+    assert.equal(repositories.listAcademicBlocks().length, 3);
+
+    const users = repositories.listUsers();
+    const student = users.find(u => u.role === "student")!;
+    const personnel = users.find(u => u.role === "personnel")!;
+    const facilities = repositories.listFacilities();
+    const room = facilities.find(f => f.name === "CIC Conference Room")!;
+    const inactive = facilities.find(f => !f.active)!;
+
+    const scheduleIndex = createScheduleIndex(repositories);
+    assert.equal(scheduleIndex.verifyAllInvariants(), true);
+
+    const server = createApp(repositories, scheduleIndex).listen(0, "127.0.0.1");
+    try {
+      await once(server, "listening");
+      const address = server.address();
+      assert(address && typeof address !== "string");
+      const base = `http://127.0.0.1:${address.port}/api`;
+
+      async function request(method: string, path: string, body?: unknown) {
+        const res = await fetch(`${base}/${path}`, {
+          method,
+          headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        return { status: res.status, json: await res.json() };
+      }
+
+      const dayStart = Date.parse("2026-12-01T00:00:00+08:00");
+      const morningStart = Date.parse("2026-12-01T08:00:00+08:00");
+      const morningEnd = Date.parse("2026-12-01T10:00:00+08:00");
+      const midStart = Date.parse("2026-12-01T10:00:00+08:00");
+      const midEnd = Date.parse("2026-12-01T12:00:00+08:00");
+      const dayEnd = Date.parse("2026-12-02T00:00:00+08:00");
+
+      // Non-personnel cannot create academic blocks
+      assert.equal(
+        (await request("POST", "academic-blocks", {
+          actorUserId: student.id,
+          facilityId: room.id,
+          title: "Unauthorized block",
+          start: morningStart,
+          end: morningEnd,
+        })).status,
+        403,
+      );
+
+      // Inactive facility rejected
+      assert.equal(
+        (await request("POST", "academic-blocks", {
+          actorUserId: personnel.id,
+          facilityId: inactive.id,
+          title: "Maintenance room class",
+          start: morningStart,
+          end: morningEnd,
+        })).json.error.code,
+        "FACILITY_INACTIVE",
+      );
+
+      // Personnel creates an academic schedule block [08:00, 10:00)
+      const createdBlock = await request("POST", "academic-blocks", {
+        actorUserId: personnel.id,
+        facilityId: room.id,
+        title: "  IC 217 Departmental Defense  ",
+        start: morningStart,
+        end: morningEnd,
+      });
+      assert.equal(createdBlock.status, 201);
+      assert.equal(createdBlock.json.data.title, "IC 217 Departmental Defense");
+      const blockId: number = createdBlock.json.data.id;
+      assert.equal(scheduleIndex.hasAcademicBlock(room.id, blockId, morningStart), true);
+      assert.equal(scheduleIndex.verifyAllInvariants(), true);
+
+      // Availability check detects conflict on [09:00, 10:30) and reports open on adjacent [10:00, 12:00)
+      const busyCheck = await request(
+        "GET",
+        `schedule/availability?facilityId=${room.id}&start=${morningStart + 3_600_000}&end=${morningEnd + 1_800_000}`,
+      );
+      assert.equal(busyCheck.status, 200);
+      assert.equal(busyCheck.json.data.available, false);
+      assert.equal(busyCheck.json.data.conflict.kind, "academic");
+      assert.equal(busyCheck.json.data.conflict.id, blockId);
+
+      const freeCheck = await request(
+        "GET",
+        `schedule/availability?facilityId=${room.id}&start=${midStart}&end=${midEnd}`,
+      );
+      assert.equal(freeCheck.status, 200);
+      assert.equal(freeCheck.json.data.available, true);
+      assert.equal(freeCheck.json.data.conflict, null);
+
+      // Submit & approve adjacent reservation [10:00, 12:00), plus a pending reservation [13:00, 14:00)
+      const subConfirmed = await request("POST", "reservations", {
+        userId: student.id,
+        facilityId: room.id,
+        start: midStart,
+        end: midEnd,
+        purpose: "Thesis consultation",
+      });
+      assert.equal(subConfirmed.status, 201);
+      await request("PATCH", `reservations/${subConfirmed.json.data.id}/status`, {
+        actorUserId: personnel.id,
+        action: "approve",
+      });
+
+      const subPending = await request("POST", "reservations", {
+        userId: student.id,
+        facilityId: room.id,
+        start: midEnd + 3_600_000,
+        end: midEnd + 7_200_000,
+        purpose: "Pending request outside tree",
+      });
+      assert.equal(subPending.status, 201);
+
+      // Personnel cannot add an academic block overlapping the confirmed reservation [10:00, 12:00)
+      const conflictBlock = await request("POST", "academic-blocks", {
+        actorUserId: personnel.id,
+        facilityId: room.id,
+        title: "Overlapping class",
+        start: midStart + 1_800_000,
+        end: midEnd + 1_800_000,
+      });
+      assert.equal(conflictBlock.status, 409);
+      assert.equal(conflictBlock.json.error.code, "SCHEDULE_CONFLICT");
+
+      // Query facility schedule window [09:00, 24:00) -> includes straddling 08:00–10:00 block + 10:00–12:00 reservation, excludes pending
+      const windowRes = await request(
+        "GET",
+        `facilities/${room.id}/schedule?start=${morningStart + 3_600_000}&end=${dayEnd}`,
+      );
+      assert.equal(windowRes.status, 200);
+      assert.deepEqual(
+        windowRes.json.data.map((item: { kind: string; id: number }) => `${item.kind}:${item.id}`),
+        [`academic:${blockId}`, `reservation:${subConfirmed.json.data.id}`],
+      );
+
+      // Non-personnel cannot delete academic block; personnel can delete it and free the slot
+      assert.equal(
+        (await request("DELETE", `academic-blocks/${blockId}`, { actorUserId: student.id })).status,
+        403,
+      );
+      const deletedBlock = await request("DELETE", `academic-blocks/${blockId}`, {
+        actorUserId: personnel.id,
+      });
+      assert.equal(deletedBlock.status, 200);
+      assert.equal(scheduleIndex.hasAcademicBlock(room.id, blockId, morningStart), false);
+      assert.equal(scheduleIndex.verifyAllInvariants(), true);
+
+      const freedCheck = await request(
+        "GET",
+        `schedule/availability?facilityId=${room.id}&start=${morningStart}&end=${morningEnd}`,
+      );
+      assert.equal(freedCheck.json.data.available, true);
+
+      // Restart reconstruction preserves remaining confirmed reservation and seeded blocks
+      const rebuilt = createScheduleIndex(repositories);
+      assert.equal(rebuilt.verifyAllInvariants(), true);
+      assert.equal(rebuilt.getFacilityTreeSize(room.id), 1);
+      assert.equal((await request("GET", `facilities/${ dayStart ? room.id : 0 }/schedule?start=${dayStart}&end=${dayEnd}`)).json.data.length, 1);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
+  } finally {
+    db.close();
+  }
+});

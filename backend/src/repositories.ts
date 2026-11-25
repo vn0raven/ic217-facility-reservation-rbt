@@ -54,10 +54,24 @@ export function createRepositories(db: Database.Database) {
   const updateStatus = db.prepare<[ReservationStatus, number]>(
     "UPDATE reservations SET status = ? WHERE id = ?",
   );
-  const academicBlocks = db.prepare<[number], AcademicScheduleBlock>(`
-    SELECT id, facility_id AS facilityId, title, start_ms AS start, end_ms AS end
-    FROM academic_schedule_blocks WHERE facility_id = ? ORDER BY start_ms, id
-  `);
+
+  const academicColumns = "id, facility_id AS facilityId, title, start_ms AS start, end_ms AS end";
+  const allAcademicBlocks = db.prepare<[], AcademicScheduleBlock>(
+    `SELECT ${academicColumns} FROM academic_schedule_blocks ORDER BY start_ms, id`,
+  );
+  const facilityAcademicBlocks = db.prepare<[number], AcademicScheduleBlock>(
+    `SELECT ${academicColumns} FROM academic_schedule_blocks WHERE facility_id = ? ORDER BY start_ms, id`,
+  );
+  const academicBlockById = db.prepare<[number], AcademicScheduleBlock>(
+    `SELECT ${academicColumns} FROM academic_schedule_blocks WHERE id = ?`,
+  );
+  const insertAcademicBlock = db.prepare<[number, string, number, number]>(
+    `INSERT INTO academic_schedule_blocks (facility_id, title, start_ms, end_ms)
+     VALUES (?, ?, ?, ?)`,
+  );
+  const removeAcademicBlock = db.prepare<[number]>(
+    "DELETE FROM academic_schedule_blocks WHERE id = ?",
+  );
 
   return {
     listUsers: () => users.all(),
@@ -111,7 +125,29 @@ export function createRepositories(db: Database.Database) {
       if (result.changes === 0) return undefined;
       return reservationById.get(id);
     },
-    listAcademicBlocks: (facilityId: number) => academicBlocks.all(facilityId),
+    getAcademicBlock: (id: number) => academicBlockById.get(id),
+    listAcademicBlocks: (facilityId?: number) =>
+      facilityId === undefined ? allAcademicBlocks.all() : facilityAcademicBlocks.all(facilityId),
+    createAcademicBlock(input: {
+      facilityId: number;
+      title: string;
+      start: number;
+      end: number;
+    }): AcademicScheduleBlock {
+      const info = insertAcademicBlock.run(
+        input.facilityId,
+        input.title.trim(),
+        input.start,
+        input.end,
+      );
+      return academicBlockById.get(Number(info.lastInsertRowid))!;
+    },
+    deleteAcademicBlock(id: number): AcademicScheduleBlock | undefined {
+      const existing = academicBlockById.get(id);
+      if (!existing) return undefined;
+      const result = removeAcademicBlock.run(id);
+      return result.changes > 0 ? existing : undefined;
+    },
     runInTransaction<T>(operation: () => T): T {
       return db.transaction(operation).immediate();
     },

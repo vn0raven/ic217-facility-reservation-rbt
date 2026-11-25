@@ -59,3 +59,44 @@ export interface AcademicScheduleBlock extends ScheduleInterval {
   id: number;
   title: string;
 }
+
+export interface CreateAcademicBlockInput {
+  actorUserId: number;
+  facilityId: number;
+  title: string;
+  start: number;
+  end: number;
+}
+
+export interface DeleteAcademicBlockInput {
+  actorUserId: number;
+}
+
+export type FacilityScheduleItem =
+  | {
+      kind: "reservation";
+      id: number;
+      facilityId: number;
+      start: number;
+      end: number;
+      purpose: string;
+      userId: number;
+      requesterName: string;
+      requesterRole: UserRole;
+    }
+  | {
+      kind: "academic";
+      id: number;
+      facilityId: number;
+      start: number;
+      end: number;
+      title: string;
+    };
+
+export interface AvailabilityCheckResult {
+  facilityId: number;
+  start: number;
+  end: number;
+  available: boolean;
+  conflict: FacilityScheduleItem | null;
+}

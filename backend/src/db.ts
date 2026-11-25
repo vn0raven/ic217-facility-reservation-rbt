@@ -7,6 +7,9 @@ import type { UserRole } from "../../shared/types/index.ts";
 
 const dataDirectory = new URL("../data/", import.meta.url);
 const databasePath = fileURLToPath(new URL("ic217.sqlite", dataDirectory));
+const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
 const DEMO_USERS: ReadonlyArray<{
   name: string;
@@ -52,6 +55,18 @@ const DEMO_FACILITIES: ReadonlyArray<{
   { name: "CIC Conference Room", location: "IC Building, 3rd Floor", capacity: 20, active: 1 },
   { name: "Audio-Visual Room", location: "IC Building, Ground Floor", capacity: 80, active: 0 },
 ];
+
+function currentManilaMondayUtcMs(nowMs = Date.now()): number {
+  const shifted = new Date(nowMs + MANILA_OFFSET_MS);
+  const dayOfWeek = shifted.getUTCDay(); // 0 = Sun, 1 = Mon, ...
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  const manilaMidnightShifted = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate() - daysSinceMonday,
+  );
+  return manilaMidnightShifted - MANILA_OFFSET_MS;
+}
 
 export function openDatabase(filename = databasePath): Database.Database {
   if (filename === databasePath) mkdirSync(dataDirectory, { recursive: true });
@@ -159,6 +174,11 @@ export function openDatabase(filename = databasePath): Database.Database {
       db.pragma("foreign_keys = ON");
     }
 
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS academic_blocks_by_facility_start
+      ON academic_schedule_blocks (facility_id, start_ms, id);
+    `);
+
     return db;
   } catch (error) {
     db.close();
@@ -166,7 +186,10 @@ export function openDatabase(filename = databasePath): Database.Database {
   }
 }
 
-export function seedDemoData(db: Database.Database): void {
+export function seedDemoData(
+  db: Database.Database,
+  options?: { seedScheduleBlocks?: boolean; referenceTimeMs?: number },
+): void {
   const insertUser = db.prepare(`
     INSERT INTO users (name, email, role, department)
     VALUES (?, ?, ?, ?)
@@ -177,6 +200,24 @@ export function seedDemoData(db: Database.Database): void {
     VALUES (?, ?, ?, ?)
     ON CONFLICT(name) DO NOTHING
   `);
+  const findFacilityByName = db.prepare<[string], { id: number; active: number }>(
+    "SELECT id, active FROM facilities WHERE name = ?",
+  );
+  const existingBlockByTitle = db.prepare<[number, string], { id: number }>(
+    "SELECT id FROM academic_schedule_blocks WHERE facility_id = ? AND title = ? LIMIT 1",
+  );
+  const hasOverlapInDb = db.prepare<[number, number, number, number, number, number], { hit: number }>(`
+    SELECT 1 AS hit FROM academic_schedule_blocks
+    WHERE facility_id = ? AND start_ms < ? AND ? < end_ms
+    UNION ALL
+    SELECT 1 AS hit FROM reservations
+    WHERE facility_id = ? AND status = 'confirmed' AND start_ms < ? AND ? < end_ms
+    LIMIT 1
+  `);
+  const insertBlock = db.prepare<[number, string, number, number]>(`
+    INSERT INTO academic_schedule_blocks (facility_id, title, start_ms, end_ms)
+    VALUES (?, ?, ?, ?)
+  `);
 
   db.transaction(() => {
     for (const user of DEMO_USERS) {
@@ -185,18 +226,52 @@ export function seedDemoData(db: Database.Database): void {
     for (const facility of DEMO_FACILITIES) {
       insertFacility.run(facility.name, facility.location, facility.capacity, facility.active);
     }
+
+    if (!options?.seedScheduleBlocks) return;
+
+    const mondayStart = currentManilaMondayUtcMs(options.referenceTimeMs);
+    const demoBlocks = [
+      {
+        facilityName: "IC Lecture Room 101",
+        title: "IC 217 – Data Structures Lecture",
+        start: mondayStart + 0 * DAY_MS + 8 * HOUR_MS,
+        end: mondayStart + 0 * DAY_MS + 10 * HOUR_MS,
+      },
+      {
+        facilityName: "Programming Laboratory 1",
+        title: "IC 217 – Red-Black Tree Laboratory",
+        start: mondayStart + 2 * DAY_MS + 9 * HOUR_MS,
+        end: mondayStart + 2 * DAY_MS + 12 * HOUR_MS,
+      },
+      {
+        facilityName: "IC Lecture Room 101",
+        title: "CS 214 – Object-Oriented Programming",
+        start: mondayStart + 4 * DAY_MS + 13 * HOUR_MS,
+        end: mondayStart + 4 * DAY_MS + 15 * HOUR_MS,
+      },
+    ];
+
+    for (const block of demoBlocks) {
+      const target = findFacilityByName.get(block.facilityName);
+      if (!target || target.active !== 1) continue;
+      if (existingBlockByTitle.get(target.id, block.title)) continue;
+      if (hasOverlapInDb.get(target.id, block.end, block.start, target.id, block.end, block.start)) {
+        continue;
+      }
+      insertBlock.run(target.id, block.title, block.start, block.end);
+    }
   }).immediate();
 }
 
 export function initializeDatabase(verify = false, seed = false): void {
   const db = openDatabase(process.env.SQLITE_PATH);
   try {
-    if (seed) seedDemoData(db);
+    if (seed) seedDemoData(db, { seedScheduleBlocks: true });
     if (!verify) return;
 
     db.exec("BEGIN");
     try {
-      const marker = `Phase 3 check ${randomUUID()}`;
+      const marker = `Phase 4 check ${randomUUID()}`;
       const user = db.prepare(
         "INSERT INTO users (name, email, role, department) VALUES (?, ?, ?, ?)",
       ).run(marker, `${randomUUID()}@example.invalid`, "student", "CIC").lastInsertRowid;
@@ -258,7 +333,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   initializeDatabase(verify, seed);
   const actions = [
     "initialized",
-    ...(seed ? ["demo data seeded"] : []),
+    ...(seed ? ["demo users, facilities, and academic schedule blocks seeded"] : []),
     ...(verify ? ["read/write verified (sample rows rolled back)"] : []),
   ];
   console.log(`SQLite ${actions.join(", ")} at ${target}`);
