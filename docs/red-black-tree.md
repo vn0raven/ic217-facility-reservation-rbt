@@ -17,6 +17,7 @@ different tables that share a numeric ID.
 | Predecessor, successor, and lower bound | O(log n) | O(1) |
 | Ordered range iteration (`k` yielded entries) | O(log n + k) | O(log n) |
 | Full in-order iteration | O(n) | O(log n) |
+| Snapshot export (`exportSnapshot`) | O(n) | O(n) |
 | Invariant verification | O(n) | O(n) |
 
 The bounds assume constant-time key comparisons and a valid tree with

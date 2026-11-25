@@ -276,3 +276,55 @@ test("extracts half-open schedule windows with predecessor and early-stopping ra
   assert.deepEqual(queryWindow(9_00, 12_00), ["Morning review"]);
   assert.deepEqual(queryWindow(18_00, 20_00), []);
 });
+
+test("exports immutable structural snapshots and records rotation/recolor operation traces", () => {
+  const tree = makeTree();
+  const emptySnap = tree.exportSnapshot();
+  assert.equal(emptySnap.size, 0);
+  assert.equal(emptySnap.height, 0);
+  assert.equal(emptySnap.blackHeight, 0);
+  assert.equal(emptySnap.rootKey, null);
+  assert.equal(emptySnap.invariantsValid, true);
+  assert.equal(Object.isFrozen(emptySnap), true);
+  assert.equal(Object.isFrozen(emptySnap.nodes), true);
+
+  // Inserting 10, 20, 30 triggers a left-rotation around 10 making 20 the black root with red children 10 & 30
+  assert.equal(tree.insert(key(10, "academic:1"), "A1"), true);
+  assert.equal(tree.insert(key(20, "reservation:2"), "R2"), true);
+  assert.equal(tree.insert(key(30, "academic:3"), "A3"), true);
+  const insertTrace = tree.getLastOperationSteps();
+  assert.equal(insertTrace.some(step => step.includes("left-rotated")), true);
+
+  // Inserting 40 triggers red-uncle recoloring
+  assert.equal(tree.insert(key(40, "reservation:4"), "R4"), true);
+  const recolorTrace = tree.getLastOperationSteps();
+  assert.equal(recolorTrace.some(step => step.includes("Recolored parent")), true);
+
+  const snap = tree.exportSnapshot();
+  assert.equal(snap.size, 4);
+  assert.equal(snap.height, 3);
+  assert.equal(snap.blackHeight, 2);
+  assert.equal(snap.invariantsValid, true);
+  assert.deepEqual(snap.rootKey, key(20, "reservation:2"));
+
+  const byId = new Map(snap.nodes.map(node => [node.key.id, node]));
+  const root = byId.get("reservation:2")!;
+  assert.equal(root.color, "black");
+  assert.equal(root.parentKey, null);
+  assert.equal(root.leftKey?.id, "academic:1");
+  assert.equal(root.rightKey?.id, "academic:3");
+  assert.equal(Object.isFrozen(root), true);
+
+  const leaf = byId.get("reservation:4")!;
+  assert.equal(leaf.color, "red");
+  assert.equal(leaf.parentKey?.id, "academic:3");
+  assert.equal(leaf.depth, 2);
+  assert.equal(leaf.blackDepth, 2);
+
+  // Deleting a black node records deletion steps and maintains valid snapshot
+  assert.equal(tree.delete(key(10, "academic:1")), true);
+  assert.equal(tree.getLastOperationSteps().length > 0, true);
+  const afterDelete = tree.exportSnapshot();
+  assert.equal(afterDelete.size, 3);
+  assert.equal(afterDelete.invariantsValid, true);
+});

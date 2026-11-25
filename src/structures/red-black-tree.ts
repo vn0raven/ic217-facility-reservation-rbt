@@ -17,13 +17,41 @@ export interface TreeEntry<K, V> {
   readonly value: V;
 }
 
-type Color = "red" | "black";
+export type NodeColor = "red" | "black";
+
+export interface TreeNodeSnapshot<K, V> {
+  readonly key: K;
+  readonly value: V;
+  readonly color: NodeColor;
+  readonly parentKey: K | null;
+  readonly leftKey: K | null;
+  readonly rightKey: K | null;
+  readonly depth: number;
+  readonly blackDepth: number;
+}
+
+export interface TreeSnapshot<K, V> {
+  readonly size: number;
+  readonly height: number;
+  readonly blackHeight: number;
+  readonly invariantsValid: boolean;
+  readonly rootKey: K | null;
+  readonly nodes: ReadonlyArray<TreeNodeSnapshot<K, V>>;
+}
+
+function defaultDescribeKey<K>(key: K): string {
+  if (typeof key === "object" && key !== null && "id" in key) {
+    const id = (key as { id: unknown }).id;
+    if (typeof id === "string" && id.length > 0) return id;
+  }
+  return String(key);
+}
 
 class TreeNode<K, V> {
   left: TreeNode<K, V> = this;
   right: TreeNode<K, V> = this;
   parent: TreeNode<K, V> = this;
-  color: Color = "black";
+  color: NodeColor = "black";
   readonly entry: TreeEntry<K, V> | undefined;
 
   constructor(entry?: TreeEntry<K, V>) {
@@ -40,15 +68,26 @@ export class RedBlackTree<K, V> {
   private readonly nil = new TreeNode<K, V>();
   private root = this.nil;
   private count = 0;
+  private lastSteps: ReadonlyArray<string> = Object.freeze([]);
   private readonly compare: (a: K, b: K) => number;
+  private readonly describeKey: (key: K) => string;
 
   /** The comparator must define a total order. Stored keys must stay immutable. */
-  constructor(compare: (a: K, b: K) => number) {
+  constructor(
+    compare: (a: K, b: K) => number,
+    describeKey: (key: K) => string = defaultDescribeKey,
+  ) {
     this.compare = compare;
+    this.describeKey = describeKey;
   }
 
   get size(): number {
     return this.count;
+  }
+
+  /** Step-by-step balancing trace recorded during the most recent insert or delete. */
+  getLastOperationSteps(): ReadonlyArray<string> {
+    return this.lastSteps;
   }
 
   /** Returns false and keeps the existing value when the key is present. */
@@ -59,7 +98,12 @@ export class RedBlackTree<K, V> {
     while (current !== this.nil) {
       parent = current;
       order = this.compare(key, current.key);
-      if (order === 0) return false;
+      if (order === 0) {
+        this.lastSteps = Object.freeze([
+          `Duplicate key ${this.describeKey(key)} ignored; existing entry preserved`,
+        ]);
+        return false;
+      }
       current = order < 0 ? current.left : current.right;
     }
 
@@ -69,11 +113,26 @@ export class RedBlackTree<K, V> {
     node.left = this.nil;
     node.right = this.nil;
     node.color = "red";
-    if (parent === this.nil) this.root = node;
-    else if (order < 0) parent.left = node;
-    else parent.right = node;
+
+    const steps: string[] = [];
+    if (parent === this.nil) {
+      this.root = node;
+      steps.push(`Inserted ${this.describeKey(key)} as initial root`);
+    } else if (order < 0) {
+      parent.left = node;
+      steps.push(
+        `Inserted red node ${this.describeKey(key)} as left child of ${this.describeKey(parent.key)}`,
+      );
+    } else {
+      parent.right = node;
+      steps.push(
+        `Inserted red node ${this.describeKey(key)} as right child of ${this.describeKey(parent.key)}`,
+      );
+    }
+
     this.count++;
-    this.fixInsertion(node);
+    this.fixInsertion(node, steps);
+    this.lastSteps = Object.freeze(steps);
     return true;
   }
 
@@ -83,16 +142,24 @@ export class RedBlackTree<K, V> {
 
   delete(key: K): boolean {
     const target = this.find(key);
-    if (target === this.nil) return false;
+    if (target === this.nil) {
+      this.lastSteps = Object.freeze([
+        `Key ${this.describeKey(key)} not found; tree unchanged`,
+      ]);
+      return false;
+    }
 
+    const steps: string[] = [];
     let removedColor = target.color;
     let replacement: TreeNode<K, V>;
     if (target.left === this.nil) {
       replacement = target.right;
       this.transplant(target, replacement);
+      steps.push(`Removed ${removedColor} node ${this.describeKey(target.key)} (no left child)`);
     } else if (target.right === this.nil) {
       replacement = target.left;
       this.transplant(target, replacement);
+      steps.push(`Removed ${removedColor} node ${this.describeKey(target.key)} (no right child)`);
     } else {
       let successor = target.right;
       while (successor.left !== this.nil) successor = successor.left;
@@ -109,11 +176,17 @@ export class RedBlackTree<K, V> {
       successor.left = target.left;
       successor.left.parent = successor;
       successor.color = target.color;
+      steps.push(
+        `Replaced ${this.describeKey(target.key)} with in-order successor ${this.describeKey(successor.key)}`,
+      );
     }
 
     this.count--;
-    if (removedColor === "black") this.fixDeletion(replacement);
+    if (removedColor === "black") {
+      this.fixDeletion(replacement, steps);
+    }
     this.nil.parent = this.nil;
+    this.lastSteps = Object.freeze(steps);
     return true;
   }
 
@@ -167,6 +240,80 @@ export class RedBlackTree<K, V> {
   /** Smallest key greater than or equal to the probe. */
   lowerBound(key: K): TreeEntry<K, V> | undefined {
     return this.neighbor(key, "right", true);
+  }
+
+  /** Exports an immutable level-order snapshot of every real node and its links. */
+  exportSnapshot(): TreeSnapshot<K, V> {
+    const invariantsValid = this.verifyInvariants();
+    if (this.root === this.nil) {
+      return Object.freeze({
+        size: 0,
+        height: 0,
+        blackHeight: 0,
+        invariantsValid,
+        rootKey: null,
+        nodes: Object.freeze([]),
+      });
+    }
+
+    let blackHeight = 0;
+    let spine = this.root;
+    while (spine !== this.nil) {
+      if (spine.color === "black") blackHeight++;
+      spine = spine.left;
+    }
+
+    const nodes: TreeNodeSnapshot<K, V>[] = [];
+    const queue: Array<{ node: TreeNode<K, V>; depth: number; blackDepth: number }> = [
+      {
+        node: this.root,
+        depth: 0,
+        blackDepth: this.root.color === "black" ? 1 : 0,
+      },
+    ];
+    let maxDepth = 0;
+
+    for (let index = 0; index < queue.length; index++) {
+      const { node, depth, blackDepth } = queue[index];
+      if (depth > maxDepth) maxDepth = depth;
+
+      nodes.push(
+        Object.freeze({
+          key: node.key,
+          value: node.entry!.value,
+          color: node.color,
+          parentKey: node.parent === this.nil ? null : node.parent.key,
+          leftKey: node.left === this.nil ? null : node.left.key,
+          rightKey: node.right === this.nil ? null : node.right.key,
+          depth,
+          blackDepth,
+        }),
+      );
+
+      if (node.left !== this.nil) {
+        queue.push({
+          node: node.left,
+          depth: depth + 1,
+          blackDepth: blackDepth + (node.left.color === "black" ? 1 : 0),
+        });
+      }
+      if (node.right !== this.nil) {
+        queue.push({
+          node: node.right,
+          depth: depth + 1,
+          blackDepth: blackDepth + (node.right.color === "black" ? 1 : 0),
+        });
+      }
+    }
+
+    return Object.freeze({
+      size: this.count,
+      height: maxDepth + 1,
+      blackHeight,
+      invariantsValid,
+      rootKey: this.root.key,
+      nodes: Object.freeze(nodes),
+    });
   }
 
   verifyInvariants(): boolean {
@@ -247,7 +394,7 @@ export class RedBlackTree<K, V> {
     node.parent = pivot;
   }
 
-  private fixInsertion(node: TreeNode<K, V>): void {
+  private fixInsertion(node: TreeNode<K, V>, steps: string[]): void {
     while (node.parent.color === "red") {
       const grandparent = node.parent.parent;
       const parentOnLeft = node.parent === grandparent.left;
@@ -256,6 +403,9 @@ export class RedBlackTree<K, V> {
         node.parent.color = "black";
         uncle.color = "black";
         grandparent.color = "red";
+        steps.push(
+          `Recolored parent ${this.describeKey(node.parent.key)} and uncle ${this.describeKey(uncle.key)} black; grandparent ${this.describeKey(grandparent.key)} red`,
+        );
         node = grandparent;
         continue;
       }
@@ -264,19 +414,33 @@ export class RedBlackTree<K, V> {
       if (parentOnLeft && node === node.parent.right) {
         node = node.parent;
         this.rotateLeft(node);
+        steps.push(`Left-rotated around ${this.describeKey(node.key)} to align left-right path`);
       } else if (!parentOnLeft && node === node.parent.left) {
         node = node.parent;
         this.rotateRight(node);
+        steps.push(`Right-rotated around ${this.describeKey(node.key)} to align right-left path`);
       }
       node.parent.color = "black";
       grandparent.color = "red";
-      if (parentOnLeft) this.rotateRight(grandparent);
-      else this.rotateLeft(grandparent);
+      if (parentOnLeft) {
+        this.rotateRight(grandparent);
+        steps.push(
+          `Recolored ${this.describeKey(node.parent.key)} black and right-rotated around ${this.describeKey(grandparent.key)}`,
+        );
+      } else {
+        this.rotateLeft(grandparent);
+        steps.push(
+          `Recolored ${this.describeKey(node.parent.key)} black and left-rotated around ${this.describeKey(grandparent.key)}`,
+        );
+      }
     }
-    this.root.color = "black";
+    if (this.root.color !== "black") {
+      this.root.color = "black";
+      steps.push(`Colored root ${this.describeKey(this.root.key)} black`);
+    }
   }
 
-  private fixDeletion(node: TreeNode<K, V>): void {
+  private fixDeletion(node: TreeNode<K, V>, steps: string[]): void {
     while (node !== this.root && node.color === "black") {
       const parent = node.parent;
       const onLeft = node === parent.left;
@@ -287,14 +451,24 @@ export class RedBlackTree<K, V> {
       if (sibling.color === "red") {
         sibling.color = "black";
         parent.color = "red";
-        if (onLeft) this.rotateLeft(parent);
-        else this.rotateRight(parent);
+        if (onLeft) {
+          this.rotateLeft(parent);
+          steps.push(
+            `Converted red sibling ${this.describeKey(sibling.key)} via left-rotation around ${this.describeKey(parent.key)}`,
+          );
+        } else {
+          this.rotateRight(parent);
+          steps.push(
+            `Converted red sibling ${this.describeKey(sibling.key)} via right-rotation around ${this.describeKey(parent.key)}`,
+          );
+        }
         sibling = parent[far];
       }
 
       if (sibling[near].color === "black" && sibling[far].color === "black") {
         // Move the missing black level up to the parent.
         sibling.color = "red";
+        steps.push(`Recolored sibling ${this.describeKey(sibling.key)} red and propagated fixup upward`);
         node = parent;
         continue;
       }
@@ -302,18 +476,35 @@ export class RedBlackTree<K, V> {
       if (sibling[far].color === "black") {
         sibling[near].color = "black";
         sibling.color = "red";
-        if (onLeft) this.rotateRight(sibling);
-        else this.rotateLeft(sibling);
+        if (onLeft) {
+          this.rotateRight(sibling);
+          steps.push(`Right-rotated around sibling ${this.describeKey(sibling.key)}`);
+        } else {
+          this.rotateLeft(sibling);
+          steps.push(`Left-rotated around sibling ${this.describeKey(sibling.key)}`);
+        }
         sibling = parent[far];
       }
 
       sibling.color = parent.color;
       parent.color = "black";
       sibling[far].color = "black";
-      if (onLeft) this.rotateLeft(parent);
-      else this.rotateRight(parent);
+      if (onLeft) {
+        this.rotateLeft(parent);
+        steps.push(
+          `Left-rotated around ${this.describeKey(parent.key)} and restored black-height balance`,
+        );
+      } else {
+        this.rotateRight(parent);
+        steps.push(
+          `Right-rotated around ${this.describeKey(parent.key)} and restored black-height balance`,
+        );
+      }
       node = this.root;
     }
-    node.color = "black";
+    if (node.color !== "black") {
+      node.color = "black";
+      steps.push(`Colored replacement node ${this.describeKey(node.key)} black`);
+    }
   }
 }
