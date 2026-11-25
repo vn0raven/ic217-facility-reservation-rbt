@@ -6,13 +6,14 @@ export type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: { code: string; message: string } };
 
-export type UserRole = "requester" | "admin";
+export type UserRole = "student" | "faculty" | "visitor" | "personnel";
 
 export interface User {
   id: number;
   name: string;
   email: string;
   role: UserRole;
+  department: string | null;
 }
 
 export interface Facility {
@@ -34,7 +35,24 @@ export type ReservationStatus = "pending" | "confirmed" | "rejected" | "cancelle
 export interface Reservation extends ScheduleInterval {
   id: number;
   userId: number;
+  purpose: string;
   status: ReservationStatus;
+  createdAt: number;
+}
+
+export interface CreateReservationInput {
+  userId: number;
+  facilityId: number;
+  start: number;
+  end: number;
+  purpose: string;
+}
+
+export type ReservationAction = "approve" | "reject" | "cancel";
+
+export interface UpdateReservationStatusInput {
+  actorUserId: number;
+  action: ReservationAction;
 }
 
 export interface AcademicScheduleBlock extends ScheduleInterval {

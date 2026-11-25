@@ -5,6 +5,9 @@ export interface ScheduleKey {
 }
 
 export function compareScheduleKeys(a: ScheduleKey, b: ScheduleKey): number {
+  if (!Number.isFinite(a.start) || !Number.isFinite(b.start)) {
+    throw new RangeError("ScheduleKey.start must be a finite timestamp.");
+  }
   if (a.start !== b.start) return a.start < b.start ? -1 : 1;
   return a.id === b.id ? 0 : a.id < b.id ? -1 : 1;
 }
@@ -60,6 +63,7 @@ export class RedBlackTree<K, V> {
       current = order < 0 ? current.left : current.right;
     }
 
+    if (typeof key === "object" && key !== null) Object.freeze(key);
     const node = new TreeNode(Object.freeze({ key, value }));
     node.parent = parent;
     node.left = this.nil;

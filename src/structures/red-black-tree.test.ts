@@ -173,8 +173,7 @@ test("matches a sorted reference after 6,000 seeded random insertions and deleti
         assert.equal(tree.delete(candidate), reference.delete(label), context);
       }
 
-      const sorted = [...reference.values()].sort((a, b) =>
-        a.key.start - b.key.start || a.key.id.localeCompare(b.key.id));
+      const sorted = [...reference.values()].sort((a, b) => compareScheduleKeys(a.key, b.key));
       assert.equal(tree.verifyInvariants(), true, context);
       assert.equal(tree.size, reference.size, context);
       assert.deepEqual([...tree.inOrder()], sorted, context);
@@ -196,4 +195,44 @@ test("matches a sorted reference after 6,000 seeded random insertions and deleti
     }
     assert.equal(tree.size, 0);
   }
+});
+
+test("validates finite timestamps and freezes stored ScheduleKey objects", () => {
+  const tree = makeTree();
+  const mutable = { start: 1000, id: "reservation:1" };
+  assert.equal(tree.insert(mutable, "approved"), true);
+  assert.equal(Object.isFrozen(mutable), true);
+  assert.throws(() => {
+    (mutable as { start: number }).start = 9999;
+  }, TypeError);
+
+  for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    assert.throws(() => compareScheduleKeys(key(invalid), key(1000)), RangeError);
+    assert.throws(() => compareScheduleKeys(key(1000), key(invalid)), RangeError);
+    assert.throws(() => tree.insert(key(invalid), "bad"), RangeError);
+  }
+  assert.equal(tree.verifyInvariants(), true);
+});
+
+test("supports half-open interval conflict checks and cancellation removal for approved reservations", () => {
+  const tree = new RedBlackTree<ScheduleKey, { start: number; end: number }>(compareScheduleKeys);
+  const hasConflict = (start: number, end: number): boolean => {
+    const probe = key(start, "");
+    const previous = tree.predecessor(probe);
+    if (previous && previous.value.end > start) return true;
+    const next = tree.lowerBound(probe);
+    return Boolean(next && next.value.start < end);
+  };
+
+  assert.equal(tree.insert(key(9_00, "reservation:1"), { start: 9_00, end: 10_00 }), true);
+  assert.equal(tree.insert(key(11_00, "academic:4"), { start: 11_00, end: 12_00 }), true);
+  assert.equal(tree.verifyInvariants(), true);
+
+  assert.equal(hasConflict(9_30, 10_30), true);
+  assert.equal(hasConflict(10_00, 11_00), false);
+  assert.equal(hasConflict(10_30, 11_30), true);
+
+  assert.equal(tree.delete(key(9_00, "reservation:1")), true);
+  assert.equal(hasConflict(9_30, 10_30), false);
+  assert.equal(tree.verifyInvariants(), true);
 });

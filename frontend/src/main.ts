@@ -1,6 +1,8 @@
 import { renderFacilities } from "./pages/facilities.ts";
 import { initializeReservationForm } from "./pages/reservation.ts";
-import { getFacilities, getHealth } from "./services/api.ts";
+import { initializeReservationsPage } from "./pages/reservations.ts";
+import { getFacilities, getHealth, getUsers } from "./services/api.ts";
+import { initializeActorSelector } from "./services/session.ts";
 import "./style.css";
 
 const pages = document.querySelectorAll<HTMLElement>("main > section");
@@ -25,6 +27,35 @@ void getHealth().then(
   () => { status.textContent = "API unavailable"; },
 );
 
-const facilities = getFacilities();
-void renderFacilities(facilities);
-void initializeReservationForm(facilities);
+const statFacilities = document.querySelector<HTMLElement>("#stat-facilities")!;
+const statPending = document.querySelector<HTMLElement>("#stat-pending")!;
+const statApproved = document.querySelector<HTMLElement>("#stat-approved")!;
+
+const facilitiesRequest = getFacilities();
+const usersRequest = getUsers();
+
+void facilitiesRequest.then(
+  items => {
+    statFacilities.textContent = String(items.filter(item => item.active).length);
+  },
+  () => {
+    statFacilities.textContent = "–";
+  },
+);
+
+void renderFacilities(facilitiesRequest);
+
+void (async () => {
+  const session = await initializeActorSelector(usersRequest);
+  const reservationsController = await initializeReservationsPage(
+    facilitiesRequest,
+    session,
+    reservations => {
+      statPending.textContent = String(reservations.filter(r => r.status === "pending").length);
+      statApproved.textContent = String(reservations.filter(r => r.status === "confirmed").length);
+    },
+  );
+  await initializeReservationForm(facilitiesRequest, session, () =>
+    reservationsController.refresh(),
+  );
+})();
