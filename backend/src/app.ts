@@ -4,6 +4,8 @@ import type {
   ApiResponse,
   AvailabilityCheckResult,
   FacilityScheduleItem,
+  FacilityTreeNodeView,
+  FacilityTreeSnapshotView,
   HealthResponse,
   ReservationAction,
   ReservationStatus,
@@ -60,6 +62,22 @@ function nonNegativeTimestamp(value: unknown): number | undefined {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseOptionalLocation(value: unknown): { ok: true; value: string | null } | { ok: false } {
+  if (value === undefined || value === null) return { ok: true, value: null };
+  if (typeof value !== "string") return { ok: false };
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return { ok: true, value: null };
+  if (trimmed.length > 120) return { ok: false };
+  return { ok: true, value: trimmed };
+}
+
+function parseOptionalCapacity(value: unknown): { ok: true; value: number | null } | { ok: false } {
+  if (value === undefined || value === null) return { ok: true, value: null };
+  const parsed = positiveInteger(value);
+  if (parsed === undefined) return { ok: false };
+  return { ok: true, value: parsed };
 }
 
 function fail(response: Response, status: number, code: string, message: string): void {
@@ -128,6 +146,57 @@ export function createApp(
     send(response, repositories.listFacilities());
   });
 
+  app.post("/api/facilities", (request, response) => {
+    if (!isPlainObject(request.body)) {
+      return fail(response, 400, "INVALID_BODY", "Request body must be a JSON object.");
+    }
+    const actorUserId = positiveInteger(request.body.actorUserId);
+    if (actorUserId === undefined) {
+      return fail(response, 400, "INVALID_BODY", "actorUserId must be a positive safe integer.");
+    }
+    if (typeof request.body.name !== "string") {
+      return fail(response, 400, "INVALID_FACILITY", "Facility name is required.");
+    }
+    const name = request.body.name.trim();
+    if (name.length < 1 || name.length > 80) {
+      return fail(response, 400, "INVALID_FACILITY", "Facility name must be 1 to 80 characters.");
+    }
+    const location = parseOptionalLocation(request.body.location);
+    if (!location.ok) {
+      return fail(response, 400, "INVALID_FACILITY", "Facility location must be up to 120 characters.");
+    }
+    const capacity = parseOptionalCapacity(request.body.capacity);
+    if (!capacity.ok) {
+      return fail(response, 400, "INVALID_FACILITY", "Facility capacity must be a positive integer or null.");
+    }
+    const activeRaw = request.body.active;
+    if (activeRaw !== undefined && typeof activeRaw !== "boolean") {
+      return fail(response, 400, "INVALID_FACILITY", "Facility active flag must be a boolean.");
+    }
+
+    const created = repositories.runInTransaction(() => {
+      const actor = repositories.getUser(actorUserId);
+      if (!actor) throw new HttpError(404, "USER_NOT_FOUND", "Acting user was not found.");
+      if (actor.role !== "personnel") {
+        throw new HttpError(403, "FORBIDDEN", "Only department personnel can create facilities.");
+      }
+      if (repositories.getFacilityByName(name)) {
+        throw new HttpError(409, "FACILITY_EXISTS", "A facility with that name already exists.");
+      }
+
+      const facility = repositories.createFacility({
+        name,
+        location: location.value,
+        capacity: capacity.value,
+        active: activeRaw ?? true,
+      });
+      scheduleIndex.registerFacility(facility.id);
+      return facility;
+    });
+
+    send(response, created, 201);
+  });
+
   app.get("/api/facilities/:id", (request, response) => {
     const id = positiveIdFromQuery(request.params.id);
     if (id === undefined) {
@@ -139,6 +208,65 @@ export function createApp(
     const facility = repositories.getFacility(id);
     if (!facility) return fail(response, 404, "FACILITY_NOT_FOUND", "Facility not found.");
     send(response, facility);
+  });
+
+  app.patch("/api/facilities/:id", (request, response) => {
+    const id = positiveIdFromQuery(request.params.id);
+    if (id === undefined) {
+      return fail(response, 400, "INVALID_ID", "Facility ID must be a positive safe integer.");
+    }
+    if (Object.keys(request.query).length > 0) {
+      return fail(response, 400, "INVALID_QUERY", "Facility updates do not accept query parameters.");
+    }
+    if (!isPlainObject(request.body)) {
+      return fail(response, 400, "INVALID_BODY", "Request body must be a JSON object.");
+    }
+    const actorUserId = positiveInteger(request.body.actorUserId);
+    if (actorUserId === undefined) {
+      return fail(response, 400, "INVALID_BODY", "actorUserId must be a positive safe integer.");
+    }
+
+    const hasLocation = Object.hasOwn(request.body, "location");
+    const hasCapacity = Object.hasOwn(request.body, "capacity");
+    const hasActive = Object.hasOwn(request.body, "active");
+    if (!hasLocation && !hasCapacity && !hasActive) {
+      return fail(
+        response,
+        400,
+        "INVALID_FACILITY",
+        "Provide at least one of location, capacity, or active to update.",
+      );
+    }
+
+    const location = hasLocation ? parseOptionalLocation(request.body.location) : undefined;
+    if (location && !location.ok) {
+      return fail(response, 400, "INVALID_FACILITY", "Facility location must be up to 120 characters.");
+    }
+    const capacity = hasCapacity ? parseOptionalCapacity(request.body.capacity) : undefined;
+    if (capacity && !capacity.ok) {
+      return fail(response, 400, "INVALID_FACILITY", "Facility capacity must be a positive integer or null.");
+    }
+    if (hasActive && typeof request.body.active !== "boolean") {
+      return fail(response, 400, "INVALID_FACILITY", "Facility active flag must be a boolean.");
+    }
+
+    const updated = repositories.runInTransaction(() => {
+      const actor = repositories.getUser(actorUserId);
+      if (!actor) throw new HttpError(404, "USER_NOT_FOUND", "Acting user was not found.");
+      if (actor.role !== "personnel") {
+        throw new HttpError(403, "FORBIDDEN", "Only department personnel can update facilities.");
+      }
+
+      const result = repositories.updateFacility(id, {
+        ...(location ? { location: location.value } : {}),
+        ...(capacity ? { capacity: capacity.value } : {}),
+        ...(hasActive ? { active: request.body.active as boolean } : {}),
+      });
+      if (!result) throw new HttpError(404, "FACILITY_NOT_FOUND", "Facility not found.");
+      return result;
+    });
+
+    send(response, updated);
   });
 
   app.get("/api/facilities/:id/schedule", (request, response) => {
@@ -168,6 +296,72 @@ export function createApp(
       .map(hydrateScheduleRecord)
       .filter((item): item is FacilityScheduleItem => item !== undefined);
     send(response, items);
+  });
+
+  app.get("/api/facilities/:id/tree", (request, response) => {
+    const id = positiveIdFromQuery(request.params.id);
+    if (id === undefined) {
+      return fail(response, 400, "INVALID_ID", "Facility ID must be a positive safe integer.");
+    }
+    if (Object.keys(request.query).length > 0) {
+      return fail(response, 400, "INVALID_QUERY", "Tree snapshot requests do not accept query parameters.");
+    }
+    const facility = repositories.getFacility(id);
+    if (!facility) return fail(response, 404, "FACILITY_NOT_FOUND", "Facility not found.");
+
+    const { snapshot, operations } = scheduleIndex.exportFacilitySnapshot(id);
+    const nodes: FacilityTreeNodeView[] = [];
+    for (const node of snapshot.nodes) {
+      const hydrated = hydrateScheduleRecord(node.value);
+      if (!hydrated) continue;
+      nodes.push({
+        key: { start: node.key.start, id: node.key.id },
+        color: node.color,
+        parentId: node.parentKey?.id ?? null,
+        leftId: node.leftKey?.id ?? null,
+        rightId: node.rightKey?.id ?? null,
+        depth: node.depth,
+        blackDepth: node.blackDepth,
+        item: hydrated,
+      });
+    }
+
+    const payload: FacilityTreeSnapshotView = {
+      facilityId: id,
+      size: snapshot.size,
+      height: snapshot.height,
+      blackHeight: snapshot.blackHeight,
+      invariantsValid: snapshot.invariantsValid,
+      rootId: snapshot.rootKey?.id ?? null,
+      nodes,
+      operations,
+    };
+    send(response, payload);
+  });
+
+  app.get("/api/facilities/:id/tree/lookup", (request, response) => {
+    const id = positiveIdFromQuery(request.params.id);
+    if (id === undefined) {
+      return fail(response, 400, "INVALID_ID", "Facility ID must be a positive safe integer.");
+    }
+    const query = request.query;
+    if (Object.keys(query).some(key => !ALLOWED_SCHEDULE_WINDOW_PARAMS.has(key))) {
+      return fail(response, 400, "INVALID_QUERY", "Tree lookup accepts only start and end timestamps.");
+    }
+    const start = nonNegativeTimestampFromQuery(query.start);
+    const end = nonNegativeTimestampFromQuery(query.end);
+    if (start === undefined || end === undefined || end <= start) {
+      return fail(
+        response,
+        400,
+        "INVALID_INTERVAL",
+        "start and end must be non-negative UTC millisecond integers with end after start.",
+      );
+    }
+    const facility = repositories.getFacility(id);
+    if (!facility) return fail(response, 404, "FACILITY_NOT_FOUND", "Facility not found.");
+
+    send(response, scheduleIndex.inspectProbe(id, start, end));
   });
 
   app.get("/api/schedule/availability", (request, response) => {
