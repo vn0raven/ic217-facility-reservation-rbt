@@ -1,8 +1,13 @@
 import type { Facility } from "../../../shared/types/index.ts";
 import { showFieldError } from "../components/form-field.ts";
-import { createReservation } from "../services/api.ts";
+import { checkAvailability, createReservation } from "../services/api.ts";
 import type { ActorSession } from "../services/session.ts";
-import { formatRoleLabel, manilaToUtcMs } from "../services/time.ts";
+import {
+  formatManilaRange,
+  formatRoleLabel,
+  manilaToUtcMs,
+  todayManilaDateString,
+} from "../services/time.ts";
 
 export async function initializeReservationForm(
   facilitiesRequest: Promise<Facility[]>,
@@ -17,10 +22,13 @@ export async function initializeReservationForm(
   const end = document.querySelector<HTMLInputElement>("#end")!;
   const purpose = document.querySelector<HTMLTextAreaElement>("#purpose")!;
   const feedback = document.querySelector<HTMLParagraphElement>("#form-status")!;
-  const button = form.querySelector<HTMLButtonElement>("button[type='submit']")!;
+  const checkButton = document.querySelector<HTMLButtonElement>("#check-availability")!;
+  const submitButton = form.querySelector<HTMLButtonElement>("button[type='submit']")!;
+
+  if (!date.value) date.value = todayManilaDateString();
 
   let activeFacilityCount = 0;
-  let submitting = false;
+  let busy = false;
 
   function syncFormState(): void {
     const actor = session.getActor();
@@ -29,7 +37,22 @@ export async function initializeReservationForm(
     } else {
       requesterNote.textContent = "No demonstration user available. Seed demo data on the backend first.";
     }
-    button.disabled = submitting || activeFacilityCount === 0 || !actor;
+    checkButton.disabled = busy || activeFacilityCount === 0;
+    submitButton.disabled = busy || activeFacilityCount === 0 || !actor;
+  }
+
+  function validateSelectedInterval(): { facilityId: number; startMs: number; endMs: number } | undefined {
+    if (!facility.reportValidity() || !date.reportValidity() || !start.reportValidity() || !end.reportValidity()) {
+      return undefined;
+    }
+    const startMs = manilaToUtcMs(date.value, start.value);
+    const endMs = manilaToUtcMs(date.value, end.value);
+    const invalidInterval =
+      startMs === undefined || endMs === undefined || endMs <= startMs
+        ? "End time must be after start time."
+        : "";
+    if (!showFieldError(end, invalidInterval)) return undefined;
+    return { facilityId: Number(facility.value), startMs: startMs!, endMs: endMs! };
   }
 
   session.subscribe(() => syncFormState());
@@ -53,6 +76,39 @@ export async function initializeReservationForm(
     }
   }, true);
 
+  checkButton.addEventListener("click", async () => {
+    const interval = validateSelectedInterval();
+    if (!interval) return;
+
+    busy = true;
+    syncFormState();
+    feedback.dataset.tone = "info";
+    feedback.textContent = "Checking facility Red-Black Tree schedule…";
+
+    try {
+      const result = await checkAvailability(interval.facilityId, interval.startMs, interval.endMs);
+      if (result.available) {
+        feedback.dataset.tone = "success";
+        feedback.textContent = "Slot is available in the facility's active schedule.";
+      } else if (result.conflict) {
+        const label = result.conflict.kind === "academic"
+          ? `academic block "${result.conflict.title}"`
+          : `approved reservation "${result.conflict.purpose}"`;
+        feedback.dataset.tone = "error";
+        feedback.textContent = `Unavailable: overlaps ${label} (${formatManilaRange(result.conflict.start, result.conflict.end)}).`;
+      } else {
+        feedback.dataset.tone = "error";
+        feedback.textContent = "This time slot is currently unavailable.";
+      }
+    } catch (error) {
+      feedback.dataset.tone = "error";
+      feedback.textContent = error instanceof Error ? error.message : "Unable to check availability.";
+    } finally {
+      busy = false;
+      syncFormState();
+    }
+  });
+
   form.addEventListener("submit", async event => {
     event.preventDefault();
     const actor = session.getActor();
@@ -62,31 +118,28 @@ export async function initializeReservationForm(
       return;
     }
 
-    const startMs = manilaToUtcMs(date.value, start.value);
-    const endMs = manilaToUtcMs(date.value, end.value);
-    const invalidInterval =
-      startMs === undefined || endMs === undefined || endMs <= startMs
-        ? "End time must be after start time."
-        : "";
-    if (!showFieldError(end, invalidInterval)) return;
+    const interval = validateSelectedInterval();
+    if (!interval) return;
 
     const trimmedPurpose = purpose.value.trim();
     if (!showFieldError(purpose, trimmedPurpose ? "" : "Enter a reservation purpose.")) return;
 
-    submitting = true;
+    busy = true;
     syncFormState();
     feedback.dataset.tone = "info";
     feedback.textContent = "Submitting reservation request…";
 
     try {
+      const chosenDate = date.value;
       await createReservation({
         userId: actor.id,
-        facilityId: Number(facility.value),
-        start: startMs!,
-        end: endMs!,
+        facilityId: interval.facilityId,
+        start: interval.startMs,
+        end: interval.endMs,
         purpose: trimmedPurpose,
       });
       form.reset();
+      date.value = chosenDate;
       feedback.dataset.tone = "success";
       feedback.textContent = "Reservation request submitted as Pending. Open Reservations to track or review it.";
       await onCreated();
@@ -94,7 +147,7 @@ export async function initializeReservationForm(
       feedback.dataset.tone = "error";
       feedback.textContent = error instanceof Error ? error.message : "Unable to submit reservation.";
     } finally {
-      submitting = false;
+      busy = false;
       syncFormState();
     }
   });

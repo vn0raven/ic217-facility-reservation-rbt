@@ -12,6 +12,7 @@
         <nav aria-label="Main navigation">
           <a href="#dashboard">Dashboard</a>
           <a href="#facilities">Facilities</a>
+          <a href="#schedule">Schedule</a>
           <a href="#reservation">Request facility</a>
           <a href="#reservations">Reservations</a>
         </nav>
@@ -28,8 +29,9 @@
         <p class="institution">University of Southeastern Philippines · IC 217</p>
         <h1 id="dashboard-title">Campus Facility Reservations</h1>
         <p>
-          Browse department facilities, submit reservation requests in Asia/Manila time, and
-          manage approvals with Red-Black Tree conflict protection.
+          Browse department facilities, view daily and weekly schedules backed by per-facility
+          Red-Black Trees, submit reservation requests in Asia/Manila time, and prevent
+          double-booking across classes and events.
         </p>
         <p id="api-status" role="status">Checking API connection…</p>
         <p class="prototype-note">
@@ -49,9 +51,14 @@
             <span class="summary-label">Approved bookings</span>
             <strong id="stat-approved">–</strong>
           </div>
+          <div class="panel summary-card">
+            <span class="summary-label">Academic blocks</span>
+            <strong id="stat-academic">–</strong>
+          </div>
         </div>
         <div class="dashboard-actions">
-          <a class="button" href="#facilities">Browse facilities</a>
+          <a class="button" href="#schedule">View schedules</a>
+          <a class="button btn-secondary-link" href="#facilities">Browse facilities</a>
           <a class="button btn-secondary-link" href="#reservation">Request a facility</a>
           <a class="button btn-secondary-link" href="#reservations">Manage reservations</a>
         </div>
@@ -61,6 +68,67 @@
         <h1 id="facilities-title">Facilities</h1>
         <p id="facility-status" role="status">Loading facilities…</p>
         <ul id="facility-list" class="card-grid"></ul>
+      </section>
+
+      <section id="schedule" aria-labelledby="schedule-title" hidden>
+        <h1 id="schedule-title">Facility schedule</h1>
+        <p>
+          Active schedules combine approved reservations and academic class blocks in
+          chronological order from each facility's Red-Black Tree.
+        </p>
+        <div class="panel schedule-toolbar">
+          <div>
+            <label for="schedule-facility">Facility</label>
+            <select id="schedule-facility">
+              <option value="">Loading facilities…</option>
+            </select>
+          </div>
+          <div>
+            <label for="schedule-date">Reference date (Asia/Manila)</label>
+            <input id="schedule-date" type="date">
+          </div>
+          <div class="toolbar-buttons">
+            <div class="button-row" role="group" aria-label="Schedule view mode">
+              <button id="mode-daily" type="button" class="btn-secondary" aria-pressed="false">Daily</button>
+              <button id="mode-weekly" type="button" aria-pressed="true">Weekly</button>
+            </div>
+            <div class="button-row" role="group" aria-label="Date navigation">
+              <button id="schedule-prev" type="button" class="btn-secondary">Previous</button>
+              <button id="schedule-today" type="button" class="btn-secondary">Today</button>
+              <button id="schedule-next" type="button" class="btn-secondary">Next</button>
+            </div>
+          </div>
+        </div>
+        <h2 id="schedule-range-heading" class="range-heading">Loading schedule…</h2>
+        <p id="schedule-status" role="status"></p>
+        <div id="schedule-view"></div>
+
+        <div class="academic-panel">
+          <h2>Academic class schedule blocking</h2>
+          <p id="academic-block-hint" class="requester-banner"></p>
+          <form id="academic-block-form" class="panel">
+            <label for="block-facility">Facility</label>
+            <select id="block-facility" required>
+              <option value="">Loading facilities…</option>
+            </select>
+            <label for="block-date">Class date</label>
+            <input id="block-date" type="date" required>
+            <div class="form-times">
+              <div>
+                <label for="block-start">Start time</label>
+                <input id="block-start" type="time" required>
+              </div>
+              <div>
+                <label for="block-end">End time</label>
+                <input id="block-end" type="time" required>
+              </div>
+            </div>
+            <label for="block-title">Class or schedule block description</label>
+            <input id="block-title" type="text" maxlength="120" placeholder="e.g., IC 217 – Data Structures Lab" required>
+            <p id="block-form-status" role="status"></p>
+            <button type="submit" disabled>Block academic schedule</button>
+          </form>
+        </div>
       </section>
 
       <section id="reservation" aria-labelledby="reservation-title" hidden>
@@ -87,7 +155,10 @@
           <label for="purpose">Purpose</label>
           <textarea id="purpose" name="purpose" rows="3" maxlength="250" required></textarea>
           <p id="form-status" role="status"></p>
-          <button type="submit" disabled>Submit reservation request</button>
+          <div class="button-row">
+            <button id="check-availability" type="button" class="btn-secondary" disabled>Check availability</button>
+            <button type="submit" disabled>Submit reservation request</button>
+          </div>
         </form>
       </section>
 

@@ -1,7 +1,12 @@
 import type {
+  AcademicScheduleBlock,
   ApiResponse,
+  AvailabilityCheckResult,
+  CreateAcademicBlockInput,
   CreateReservationInput,
+  DeleteAcademicBlockInput,
   Facility,
+  FacilityScheduleItem,
   HealthResponse,
   Reservation,
   ReservationStatus,
@@ -30,6 +35,52 @@ export function getUsers(): Promise<User[]> {
 
 export function getFacilities(): Promise<Facility[]> {
   return requestApi<Facility[]>("/api/facilities");
+}
+
+export function getFacilitySchedule(
+  facilityId: number,
+  start: number,
+  end: number,
+): Promise<FacilityScheduleItem[]> {
+  const params = new URLSearchParams({ start: String(start), end: String(end) });
+  return requestApi<FacilityScheduleItem[]>(`/api/facilities/${facilityId}/schedule?${params.toString()}`);
+}
+
+export function checkAvailability(
+  facilityId: number,
+  start: number,
+  end: number,
+): Promise<AvailabilityCheckResult> {
+  const params = new URLSearchParams({
+    facilityId: String(facilityId),
+    start: String(start),
+    end: String(end),
+  });
+  return requestApi<AvailabilityCheckResult>(`/api/schedule/availability?${params.toString()}`);
+}
+
+export function getAcademicBlocks(facilityId?: number): Promise<AcademicScheduleBlock[]> {
+  const query = facilityId === undefined ? "" : `?facilityId=${facilityId}`;
+  return requestApi<AcademicScheduleBlock[]>(`/api/academic-blocks${query}`);
+}
+
+export function createAcademicBlock(input: CreateAcademicBlockInput): Promise<AcademicScheduleBlock> {
+  return requestApi<AcademicScheduleBlock>("/api/academic-blocks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteAcademicBlock(
+  id: number,
+  input: DeleteAcademicBlockInput,
+): Promise<AcademicScheduleBlock> {
+  return requestApi<AcademicScheduleBlock>(`/api/academic-blocks/${id}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export function getReservations(filters?: {

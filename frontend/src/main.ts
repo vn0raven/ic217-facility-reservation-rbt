@@ -1,6 +1,8 @@
 import { renderFacilities } from "./pages/facilities.ts";
 import { initializeReservationForm } from "./pages/reservation.ts";
 import { initializeReservationsPage } from "./pages/reservations.ts";
+import { initializeSchedulePage } from "./pages/schedule.ts";
+import type { ScheduleController } from "./pages/schedule.ts";
 import { getFacilities, getHealth, getUsers } from "./services/api.ts";
 import { initializeActorSelector } from "./services/session.ts";
 import "./style.css";
@@ -30,6 +32,7 @@ void getHealth().then(
 const statFacilities = document.querySelector<HTMLElement>("#stat-facilities")!;
 const statPending = document.querySelector<HTMLElement>("#stat-pending")!;
 const statApproved = document.querySelector<HTMLElement>("#stat-approved")!;
+const statAcademic = document.querySelector<HTMLElement>("#stat-academic")!;
 
 const facilitiesRequest = getFacilities();
 const usersRequest = getUsers();
@@ -47,14 +50,26 @@ void renderFacilities(facilitiesRequest);
 
 void (async () => {
   const session = await initializeActorSelector(usersRequest);
+  let scheduleController: ScheduleController | undefined;
+
   const reservationsController = await initializeReservationsPage(
     facilitiesRequest,
     session,
     reservations => {
       statPending.textContent = String(reservations.filter(r => r.status === "pending").length);
       statApproved.textContent = String(reservations.filter(r => r.status === "confirmed").length);
+      void scheduleController?.refresh();
     },
   );
+
+  scheduleController = await initializeSchedulePage(
+    facilitiesRequest,
+    session,
+    academicCount => {
+      statAcademic.textContent = String(academicCount);
+    },
+  );
+
   await initializeReservationForm(facilitiesRequest, session, () =>
     reservationsController.refresh(),
   );
