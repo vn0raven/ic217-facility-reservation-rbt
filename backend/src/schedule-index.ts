@@ -1,6 +1,6 @@
 import { compareScheduleKeys, RedBlackTree } from "../../src/structures/red-black-tree.ts";
 import type { ScheduleKey } from "../../src/structures/red-black-tree.ts";
-import type { Reservation } from "../../shared/types/index.ts";
+import type { AcademicScheduleBlock, Reservation } from "../../shared/types/index.ts";
 import type { createRepositories } from "./repositories.ts";
 
 export interface ScheduledRecord {
@@ -90,44 +90,56 @@ export function createScheduleIndex(repositories: ReturnType<typeof createReposi
     const previous = tree.predecessor(probe);
     if (previous && previous.value.end > start) return previous.value;
 
-    const next = tree.lowerBound(probe);
+    const next = tree.successor(probe);
     if (next && next.value.start < end) return next.value;
 
     return undefined;
   }
 
-  function insertConfirmedReservation(reservation: Reservation): void {
-    const tree = ensureTree(reservation.facilityId);
-    const key = toScheduleKey("reservation", reservation.id, reservation.start);
+  function queryWindow(
+    facilityId: number,
+    windowStart: number,
+    windowEnd: number,
+  ): ScheduledRecord[] {
+    const tree = trees.get(facilityId);
+    if (!tree || tree.size === 0 || windowEnd <= windowStart) return [];
+
+    const items: ScheduledRecord[] = [];
+    const probe: ScheduleKey = { start: windowStart, id: "" };
+    const previous = tree.predecessor(probe);
+    if (previous && previous.value.end > windowStart) {
+      items.push(previous.value);
+    }
+    for (const entry of tree.rangeFrom(probe)) {
+      if (entry.key.start >= windowEnd) break;
+      items.push(entry.value);
+    }
+    return items;
+  }
+
+  function insertRecord(record: ScheduledRecord): void {
+    const tree = ensureTree(record.facilityId);
+    const key = toScheduleKey(record.kind, record.recordId, record.start);
     try {
-      if (findConflict(reservation.facilityId, reservation.start, reservation.end)) {
-        throw new Error(`Schedule conflict while indexing reservation ${reservation.id}.`);
+      if (findConflict(record.facilityId, record.start, record.end)) {
+        throw new Error(`Schedule conflict while indexing ${record.kind}:${record.recordId}.`);
       }
-      const inserted = tree.insert(key, Object.freeze({
-        kind: "reservation",
-        recordId: reservation.id,
-        facilityId: reservation.facilityId,
-        start: reservation.start,
-        end: reservation.end,
-      }));
+      const inserted = tree.insert(key, Object.freeze(record));
       if (!inserted || !tree.verifyInvariants()) {
-        throw new Error(`Failed to update schedule tree for reservation ${reservation.id}.`);
+        throw new Error(`Failed to update schedule tree for ${record.kind}:${record.recordId}.`);
       }
     } catch (error) {
-      buildFacilityTree(reservation.facilityId);
+      buildFacilityTree(record.facilityId);
       throw error;
     }
   }
 
-  function removeConfirmedReservation(
-    reservation: Pick<Reservation, "id" | "facilityId" | "start">,
-  ): void {
-    const tree = trees.get(reservation.facilityId);
+  function removeRecord(kind: "reservation" | "academic", facilityId: number, recordId: number, start: number): void {
+    const tree = trees.get(facilityId);
     if (!tree) return;
-    const key = toScheduleKey("reservation", reservation.id, reservation.start);
-    const removed = tree.delete(key);
+    const removed = tree.delete(toScheduleKey(kind, recordId, start));
     if (!removed || !tree.verifyInvariants()) {
-      buildFacilityTree(reservation.facilityId);
+      buildFacilityTree(facilityId);
     }
   }
 
@@ -135,15 +147,40 @@ export function createScheduleIndex(repositories: ReturnType<typeof createReposi
 
   return {
     findConflict,
-    insertConfirmedReservation,
-    removeConfirmedReservation,
+    queryWindow,
+    insertConfirmedReservation(reservation: Reservation): void {
+      insertRecord({
+        kind: "reservation",
+        recordId: reservation.id,
+        facilityId: reservation.facilityId,
+        start: reservation.start,
+        end: reservation.end,
+      });
+    },
+    removeConfirmedReservation(reservation: Pick<Reservation, "id" | "facilityId" | "start">): void {
+      removeRecord("reservation", reservation.facilityId, reservation.id, reservation.start);
+    },
+    insertAcademicBlock(block: AcademicScheduleBlock): void {
+      insertRecord({
+        kind: "academic",
+        recordId: block.id,
+        facilityId: block.facilityId,
+        start: block.start,
+        end: block.end,
+      });
+    },
+    removeAcademicBlock(block: Pick<AcademicScheduleBlock, "id" | "facilityId" | "start">): void {
+      removeRecord("academic", block.facilityId, block.id, block.start);
+    },
     rebuildFacility: (facilityId: number) => {
       buildFacilityTree(facilityId);
     },
     rebuildAll,
     hasReservation(facilityId: number, reservationId: number, start: number): boolean {
-      const tree = trees.get(facilityId);
-      return Boolean(tree?.search(toScheduleKey("reservation", reservationId, start)));
+      return Boolean(trees.get(facilityId)?.search(toScheduleKey("reservation", reservationId, start)));
+    },
+    hasAcademicBlock(facilityId: number, blockId: number, start: number): boolean {
+      return Boolean(trees.get(facilityId)?.search(toScheduleKey("academic", blockId, start)));
     },
     getFacilityTreeSize(facilityId: number): number {
       return trees.get(facilityId)?.size ?? 0;

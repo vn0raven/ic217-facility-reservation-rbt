@@ -2,12 +2,15 @@ import express from "express";
 import type { ErrorRequestHandler, Response } from "express";
 import type {
   ApiResponse,
+  AvailabilityCheckResult,
+  FacilityScheduleItem,
   HealthResponse,
   ReservationAction,
   ReservationStatus,
 } from "../../shared/types/index.ts";
 import type { createRepositories } from "./repositories.ts";
 import { createScheduleIndex } from "./schedule-index.ts";
+import type { ScheduledRecord } from "./schedule-index.ts";
 
 const VALID_STATUSES = new Set<ReservationStatus>([
   "pending",
@@ -17,6 +20,8 @@ const VALID_STATUSES = new Set<ReservationStatus>([
 ]);
 const VALID_ACTIONS = new Set<ReservationAction>(["approve", "reject", "cancel"]);
 const ALLOWED_RESERVATION_FILTERS = new Set(["facilityId", "userId", "status"]);
+const ALLOWED_SCHEDULE_WINDOW_PARAMS = new Set(["start", "end"]);
+const ALLOWED_AVAILABILITY_PARAMS = new Set(["facilityId", "start", "end"]);
 
 class HttpError extends Error {
   readonly status: number;
@@ -33,6 +38,12 @@ function positiveIdFromQuery(value: unknown): number | undefined {
   if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return undefined;
   const id = Number(value);
   return Number.isSafeInteger(id) ? id : undefined;
+}
+
+function nonNegativeTimestampFromQuery(value: unknown): number | undefined {
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return undefined;
+  const timestamp = Number(value);
+  return Number.isSafeInteger(timestamp) ? timestamp : undefined;
 }
 
 function positiveInteger(value: unknown): number | undefined {
@@ -68,6 +79,36 @@ export function createApp(
   const app = express();
   app.use(express.json({ limit: "16kb" }));
 
+  function hydrateScheduleRecord(record: ScheduledRecord): FacilityScheduleItem | undefined {
+    if (record.kind === "academic") {
+      const block = repositories.getAcademicBlock(record.recordId);
+      if (!block) return undefined;
+      return {
+        kind: "academic",
+        id: block.id,
+        facilityId: block.facilityId,
+        start: block.start,
+        end: block.end,
+        title: block.title,
+      };
+    }
+
+    const reservation = repositories.getReservation(record.recordId);
+    if (!reservation) return undefined;
+    const requester = repositories.getUser(reservation.userId);
+    return {
+      kind: "reservation",
+      id: reservation.id,
+      facilityId: reservation.facilityId,
+      start: reservation.start,
+      end: reservation.end,
+      purpose: reservation.purpose,
+      userId: reservation.userId,
+      requesterName: requester?.name ?? `User #${reservation.userId}`,
+      requesterRole: requester?.role ?? "student",
+    };
+  }
+
   app.get("/api/health", (_request, response) => {
     const health: HealthResponse = { status: "ok" };
     response.json(health);
@@ -98,6 +139,207 @@ export function createApp(
     const facility = repositories.getFacility(id);
     if (!facility) return fail(response, 404, "FACILITY_NOT_FOUND", "Facility not found.");
     send(response, facility);
+  });
+
+  app.get("/api/facilities/:id/schedule", (request, response) => {
+    const id = positiveIdFromQuery(request.params.id);
+    if (id === undefined) {
+      return fail(response, 400, "INVALID_ID", "Facility ID must be a positive safe integer.");
+    }
+    const query = request.query;
+    if (Object.keys(query).some(key => !ALLOWED_SCHEDULE_WINDOW_PARAMS.has(key))) {
+      return fail(response, 400, "INVALID_QUERY", "Schedule queries accept only start and end timestamps.");
+    }
+    const start = nonNegativeTimestampFromQuery(query.start);
+    const end = nonNegativeTimestampFromQuery(query.end);
+    if (start === undefined || end === undefined || end <= start) {
+      return fail(
+        response,
+        400,
+        "INVALID_INTERVAL",
+        "start and end query parameters must be non-negative UTC millisecond integers with end after start.",
+      );
+    }
+    const facility = repositories.getFacility(id);
+    if (!facility) return fail(response, 404, "FACILITY_NOT_FOUND", "Facility not found.");
+
+    const records = scheduleIndex.queryWindow(id, start, end);
+    const items = records
+      .map(hydrateScheduleRecord)
+      .filter((item): item is FacilityScheduleItem => item !== undefined);
+    send(response, items);
+  });
+
+  app.get("/api/schedule/availability", (request, response) => {
+    const query = request.query;
+    if (Object.keys(query).some(key => !ALLOWED_AVAILABILITY_PARAMS.has(key))) {
+      return fail(
+        response,
+        400,
+        "INVALID_QUERY",
+        "Availability checks accept only facilityId, start, and end.",
+      );
+    }
+    const facilityId = positiveIdFromQuery(query.facilityId);
+    if (facilityId === undefined) {
+      return fail(response, 400, "INVALID_QUERY", "facilityId must be a positive safe integer.");
+    }
+    const start = nonNegativeTimestampFromQuery(query.start);
+    const end = nonNegativeTimestampFromQuery(query.end);
+    if (start === undefined || end === undefined || end <= start) {
+      return fail(
+        response,
+        400,
+        "INVALID_INTERVAL",
+        "start and end must be non-negative UTC millisecond integers with end after start.",
+      );
+    }
+
+    const facility = repositories.getFacility(facilityId);
+    if (!facility) return fail(response, 404, "FACILITY_NOT_FOUND", "Facility not found.");
+    if (!facility.active) {
+      return fail(response, 409, "FACILITY_INACTIVE", "This facility is currently inactive.");
+    }
+
+    const conflictRecord = scheduleIndex.findConflict(facilityId, start, end);
+    const result: AvailabilityCheckResult = {
+      facilityId,
+      start,
+      end,
+      available: !conflictRecord,
+      conflict: conflictRecord ? (hydrateScheduleRecord(conflictRecord) ?? null) : null,
+    };
+    send(response, result);
+  });
+
+  app.get("/api/academic-blocks", (request, response) => {
+    const query = request.query;
+    const facilityId = query.facilityId === undefined ? undefined : positiveIdFromQuery(query.facilityId);
+    if (
+      Object.keys(query).some(key => key !== "facilityId") ||
+      (query.facilityId !== undefined && facilityId === undefined)
+    ) {
+      return fail(
+        response,
+        400,
+        "INVALID_QUERY",
+        "The optional facilityId must be one positive safe integer.",
+      );
+    }
+    send(response, repositories.listAcademicBlocks(facilityId));
+  });
+
+  app.post("/api/academic-blocks", (request, response) => {
+    if (!isPlainObject(request.body)) {
+      return fail(response, 400, "INVALID_BODY", "Request body must be a JSON object.");
+    }
+    const actorUserId = positiveInteger(request.body.actorUserId);
+    const facilityId = positiveInteger(request.body.facilityId);
+    if (actorUserId === undefined || facilityId === undefined) {
+      return fail(
+        response,
+        400,
+        "INVALID_BODY",
+        "actorUserId and facilityId must be positive safe integers.",
+      );
+    }
+
+    const start = nonNegativeTimestamp(request.body.start);
+    const end = nonNegativeTimestamp(request.body.end);
+    if (start === undefined || end === undefined || end <= start) {
+      return fail(
+        response,
+        400,
+        "INVALID_INTERVAL",
+        "start and end must be non-negative UTC millisecond timestamps with end after start.",
+      );
+    }
+
+    if (typeof request.body.title !== "string") {
+      return fail(response, 400, "INVALID_TITLE", "Academic block title is required.");
+    }
+    const title = request.body.title.trim();
+    if (title.length < 1 || title.length > 120) {
+      return fail(response, 400, "INVALID_TITLE", "Academic block title must be 1 to 120 characters.");
+    }
+
+    const created = repositories.runInTransaction(() => {
+      const actor = repositories.getUser(actorUserId);
+      if (!actor) throw new HttpError(404, "USER_NOT_FOUND", "Acting user was not found.");
+      if (actor.role !== "personnel") {
+        throw new HttpError(
+          403,
+          "FORBIDDEN",
+          "Only department personnel can block academic class schedules.",
+        );
+      }
+
+      const facility = repositories.getFacility(facilityId);
+      if (!facility) throw new HttpError(404, "FACILITY_NOT_FOUND", "Facility not found.");
+      if (!facility.active) {
+        throw new HttpError(
+          409,
+          "FACILITY_INACTIVE",
+          "Academic schedule blocks cannot be added to an inactive facility.",
+        );
+      }
+
+      const conflict = scheduleIndex.findConflict(facilityId, start, end);
+      if (conflict) {
+        const reason = conflict.kind === "academic"
+          ? "an existing academic schedule block"
+          : "an approved reservation";
+        throw new HttpError(
+          409,
+          "SCHEDULE_CONFLICT",
+          `Cannot block this slot because it overlaps ${reason}.`,
+        );
+      }
+
+      const block = repositories.createAcademicBlock({ facilityId, title, start, end });
+      scheduleIndex.insertAcademicBlock(block);
+      return block;
+    });
+
+    send(response, created, 201);
+  });
+
+  app.delete("/api/academic-blocks/:id", (request, response) => {
+    const id = positiveIdFromQuery(request.params.id);
+    if (id === undefined) {
+      return fail(response, 400, "INVALID_ID", "Academic block ID must be a positive safe integer.");
+    }
+    if (Object.keys(request.query).length > 0) {
+      return fail(response, 400, "INVALID_QUERY", "Academic block deletion does not accept query parameters.");
+    }
+    if (!isPlainObject(request.body)) {
+      return fail(response, 400, "INVALID_BODY", "Request body must be a JSON object.");
+    }
+    const actorUserId = positiveInteger(request.body.actorUserId);
+    if (actorUserId === undefined) {
+      return fail(response, 400, "INVALID_BODY", "actorUserId must be a positive safe integer.");
+    }
+
+    const deleted = repositories.runInTransaction(() => {
+      const actor = repositories.getUser(actorUserId);
+      if (!actor) throw new HttpError(404, "USER_NOT_FOUND", "Acting user was not found.");
+      if (actor.role !== "personnel") {
+        throw new HttpError(
+          403,
+          "FORBIDDEN",
+          "Only department personnel can remove academic schedule blocks.",
+        );
+      }
+
+      const removed = repositories.deleteAcademicBlock(id);
+      if (!removed) {
+        throw new HttpError(404, "ACADEMIC_BLOCK_NOT_FOUND", "Academic schedule block not found.");
+      }
+      scheduleIndex.removeAcademicBlock(removed);
+      return removed;
+    });
+
+    send(response, deleted);
   });
 
   app.get("/api/reservations", (request, response) => {

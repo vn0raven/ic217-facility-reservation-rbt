@@ -5,9 +5,9 @@
 }
 
 body { margin: 0; }
-.wrap { width: min(68rem, calc(100% - 2.5rem)); margin-inline: auto; }
+.wrap { width: min(72rem, calc(100% - 2.5rem)); margin-inline: auto; }
 .header { background: #123a35; color: #fff; }
-.header-inner, nav { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem 1.5rem; }
+.header-inner, nav { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem 1.35rem; }
 .header-inner { justify-content: space-between; padding-block: 0.85rem; }
 header a { color: inherit; text-underline-offset: 0.25rem; }
 .brand { font-weight: 750; text-decoration: none; }
@@ -47,9 +47,15 @@ h2 { font-size: 1.15rem; margin: 0; }
 .summary-label { font-size: 0.9rem; color: #3d5952; font-weight: 600; }
 .summary-card strong { font-size: 1.9rem; line-height: 1.1; color: #123a35; }
 
-.dashboard-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.dashboard-actions, .button-row { display: flex; flex-wrap: wrap; gap: 0.65rem; }
 
-#facility-status:empty, #form-status:empty, #reservations-status:empty { display: none; }
+#facility-status:empty,
+#form-status:empty,
+#reservations-status:empty,
+#schedule-status:empty,
+#block-form-status:empty {
+  display: none;
+}
 [data-tone="error"] { color: #9b1c1c; font-weight: 600; }
 [data-tone="success"] { color: #145a32; font-weight: 600; }
 
@@ -79,19 +85,20 @@ h2 { font-size: 1.15rem; margin: 0; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.65rem;
 }
 
 .badge {
   display: inline-block;
   padding: 0.2rem 0.65rem;
   border-radius: 999px;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 700;
   white-space: nowrap;
 }
 .badge-pending { background: #fef3c7; color: #92400e; }
 .badge-confirmed { background: #d1fae5; color: #065f46; }
+.badge-academic { background: #dbeafe; color: #1e3a8a; }
 .badge-rejected { background: #fee2e2; color: #991b1b; }
 .badge-cancelled { background: #e5e7eb; color: #374151; }
 
@@ -114,15 +121,58 @@ input, select, textarea {
 }
 .form-times { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
 
-.filter-bar {
+.filter-bar, .schedule-toolbar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
-  gap: 0.75rem 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.85rem 1rem;
   align-items: end;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
-.filter-bar select { margin-bottom: 0; }
+.filter-bar select,
+.schedule-toolbar select,
+.schedule-toolbar input {
+  margin-bottom: 0;
+}
+.toolbar-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
 .filter-actions { display: flex; justify-content: flex-start; }
+
+.range-heading { margin-bottom: 1rem; font-size: 1.3rem; color: #123a35; }
+
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.9rem;
+}
+.day-column { padding: 1rem; }
+.day-column h2 {
+  font-size: 1rem;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid #e1ece8;
+}
+.day-slot-list {
+  list-style: none;
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+}
+.day-slot-list .slot-card {
+  background: #f6faf8;
+  border: 1px solid #d4e2dd;
+  border-radius: 0.55rem;
+  padding: 0.75rem;
+}
+.slot-title { font-weight: 650; margin-bottom: 0.3rem; }
+.slot-meta { font-size: 0.88rem; color: #3d5952; margin-bottom: 0; }
+.slot-empty { font-size: 0.9rem; color: #5b726b; margin: 0; }
+
+.academic-panel { margin-top: 2.5rem; }
+.academic-panel h2 { font-size: 1.4rem; margin-bottom: 0.5rem; }
 
 button, .button {
   display: inline-block;
@@ -144,6 +194,11 @@ button, .button {
 .btn-danger {
   background: #9b2226;
   color: #fff;
+}
+.btn-small {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
 }
 .card-actions {
   display: flex;
