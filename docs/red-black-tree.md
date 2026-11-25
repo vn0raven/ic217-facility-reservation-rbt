@@ -15,6 +15,7 @@ different tables that share a numeric ID.
 | Size | O(1) | O(1) |
 | Insert, search, and delete | O(log n) | O(1) |
 | Predecessor, successor, and lower bound | O(log n) | O(1) |
+| Ordered range iteration (`k` yielded entries) | O(log n + k) | O(log n) |
 | Full in-order iteration | O(n) | O(log n) |
 | Invariant verification | O(n) | O(n) |
 

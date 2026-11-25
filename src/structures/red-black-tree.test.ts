@@ -187,6 +187,11 @@ test("matches a sorted reference after 6,000 seeded random insertions and deleti
       assert.deepEqual(tree.lowerBound(candidate), sorted.find(entry =>
         entry.key.start > candidate.start ||
         (entry.key.start === candidate.start && entry.key.id >= candidate.id)), context);
+      assert.deepEqual(
+        [...tree.rangeFrom(candidate)],
+        sorted.filter(entry => compareScheduleKeys(entry.key, candidate) >= 0),
+        context,
+      );
     }
 
     for (const { key: remaining } of reference.values()) {
@@ -235,4 +240,39 @@ test("supports half-open interval conflict checks and cancellation removal for a
   assert.equal(tree.delete(key(9_00, "reservation:1")), true);
   assert.equal(hasConflict(9_30, 10_30), false);
   assert.equal(tree.verifyInvariants(), true);
+});
+
+test("extracts half-open schedule windows with predecessor and early-stopping rangeFrom", () => {
+  const tree = new RedBlackTree<ScheduleKey, { start: number; end: number; label: string }>(
+    compareScheduleKeys,
+  );
+  assert.deepEqual([...tree.rangeFrom(key(0, ""))], []);
+
+  const slots = [
+    { key: key(7_30, "academic:1"), value: { start: 7_30, end: 9_00, label: "Early lab" } },
+    { key: key(9_00, "reservation:2"), value: { start: 9_00, end: 10_30, label: "Morning review" } },
+    { key: key(13_00, "academic:3"), value: { start: 13_00, end: 15_00, label: "Afternoon lecture" } },
+    { key: key(16_00, "reservation:4"), value: { start: 16_00, end: 17_30, label: "Club meeting" } },
+  ];
+  for (const slot of slots) {
+    assert.equal(tree.insert(slot.key, slot.value), true);
+  }
+
+  const queryWindow = (windowStart: number, windowEnd: number): string[] => {
+    const matches: string[] = [];
+    const probe = key(windowStart, "");
+    const before = tree.predecessor(probe);
+    if (before && before.value.end > windowStart) matches.push(before.value.label);
+    for (const entry of tree.rangeFrom(probe)) {
+      if (entry.key.start >= windowEnd) break;
+      matches.push(entry.value.label);
+    }
+    return matches;
+  };
+
+  // Includes 7:30–9:00 straddling 8:00, plus 9:00–10:30 and 13:00–15:00; stops before 16:00
+  assert.deepEqual(queryWindow(8_00, 16_00), ["Early lab", "Morning review", "Afternoon lecture"]);
+  // Exact boundary 9:00 excludes 7:30–9:00 (half-open) and includes 9:00–10:30
+  assert.deepEqual(queryWindow(9_00, 12_00), ["Morning review"]);
+  assert.deepEqual(queryWindow(18_00, 20_00), []);
 });

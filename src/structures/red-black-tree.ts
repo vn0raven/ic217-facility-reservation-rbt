@@ -131,6 +131,29 @@ export class RedBlackTree<K, V> {
     }
   }
 
+  /** Yields entries with keys greater than or equal to lower in ascending order. */
+  *rangeFrom(lower: K): IterableIterator<TreeEntry<K, V>> {
+    const stack: TreeNode<K, V>[] = [];
+    let current = this.root;
+    while (current !== this.nil) {
+      if (this.compare(current.key, lower) >= 0) {
+        stack.push(current);
+        current = current.left;
+      } else {
+        current = current.right;
+      }
+    }
+    while (stack.length > 0) {
+      const visit = stack.pop()!;
+      yield visit.entry!;
+      let next = visit.right;
+      while (next !== this.nil) {
+        stack.push(next);
+        next = next.left;
+      }
+    }
+  }
+
   /** Greatest key strictly below the probe, even when the probe is absent. */
   predecessor(key: K): TreeEntry<K, V> | undefined {
     return this.neighbor(key, "left", false);
